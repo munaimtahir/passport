@@ -26,8 +26,9 @@ import androidx.room.RoomDatabase
         DocumentLinkEntity::class,
         OfficialRecordEntity::class,
         ChangeLogEntity::class,
+        BudgetEntity::class,
     ],
-    version = 7,
+    version = 8,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -47,4 +48,5 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun goalDao(): GoalDao
     abstract fun recurringItemDao(): RecurringItemDao
     abstract fun officialRecordDao(): OfficialRecordDao
+    abstract fun budgetDao(): BudgetDao
 }

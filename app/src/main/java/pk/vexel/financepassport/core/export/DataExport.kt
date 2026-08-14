@@ -10,12 +10,14 @@ import pk.vexel.financepassport.core.database.InvestmentEventEntity
 import pk.vexel.financepassport.core.database.ReceivableEntity
 import pk.vexel.financepassport.core.database.GoalEntity
 import pk.vexel.financepassport.core.database.OfficialRecordEntity
+import pk.vexel.financepassport.core.database.BudgetEntity
 
 data class ExportSnapshot(
     val accounts: List<AccountEntity>, val events: List<FinancialEventEntity>, val assets: List<AssetEntity>,
     val liabilities: List<LiabilityEntity>, val taxItems: List<TaxItemEntity>, val documents: List<DocumentEntity>,
     val investments: List<InvestmentEventEntity> = emptyList(), val receivables: List<ReceivableEntity> = emptyList(),
     val goals: List<GoalEntity> = emptyList(), val officialRecords: List<OfficialRecordEntity> = emptyList(),
+    val budgets: List<BudgetEntity> = emptyList(),
 ) {
     fun forDateRange(fromEpochDay: Long, toEpochDay: Long): ExportSnapshot {
         require(fromEpochDay <= toEpochDay) { "Report range is invalid" }
@@ -39,7 +41,8 @@ class DataExportService {
         append("\"investments\":["); append(snapshot.investments.joinToString(",") { "{\"id\":\"${it.id}\",\"security\":\"${escape(it.securityName)}\",\"type\":\"${it.type}\",\"grossAmountMinor\":${it.grossAmountMinor}}" }); append("],")
         append("\"receivables\":["); append(snapshot.receivables.joinToString(",") { "{\"id\":\"${it.id}\",\"title\":\"${escape(it.title)}\",\"counterparty\":\"${escape(it.counterparty)}\",\"outstandingAmountMinor\":${it.outstandingAmountMinor}}" }); append("],")
         append("\"goals\":["); append(snapshot.goals.joinToString(",") { "{\"id\":\"${it.id}\",\"title\":\"${escape(it.title)}\",\"targetAmountMinor\":${it.targetAmountMinor}}" }); append("],")
-        append("\"officialRecords\":["); append(snapshot.officialRecords.joinToString(",") { "{\"id\":\"${it.id}\",\"recordType\":\"${escape(it.recordType)}\",\"title\":\"${escape(it.title)}\",\"maskedIdentifier\":\"${escape(it.maskedIdentifier ?: "")}\"}" }); append("]}")
+        append("\"officialRecords\":["); append(snapshot.officialRecords.joinToString(",") { "{\"id\":\"${it.id}\",\"recordType\":\"${escape(it.recordType)}\",\"title\":\"${escape(it.title)}\",\"maskedIdentifier\":\"${escape(it.maskedIdentifier ?: "")}\"}" }); append("],")
+        append("\"budgets\":["); append(snapshot.budgets.joinToString(",") { "{\"id\":\"${it.id}\",\"category\":\"${escape(it.category)}\",\"monthlyLimitMinor\":${it.monthlyLimitMinor}}" }); append("]}")
     }
 
     fun csvEvents(snapshot: ExportSnapshot): String = buildString {

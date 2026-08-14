@@ -91,6 +91,10 @@ interface GoalDao {
     suspend fun upsert(value: GoalEntity)
     @Query("SELECT * FROM goals ORDER BY title")
     suspend fun getAll(): List<GoalEntity>
+    @Query("SELECT * FROM goals WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): GoalEntity?
+    @Query("UPDATE goals SET currentAmountMinor = :currentAmountMinor, status = :status WHERE id = :id")
+    suspend fun updateProgress(id: String, currentAmountMinor: Long, status: String)
 }
 
 @Dao
@@ -103,6 +107,24 @@ interface RecurringItemDao {
     suspend fun pause(id: String, updatedAt: Long)
     @Query("SELECT * FROM recurring_items ORDER BY nextDueDateEpochDay, title")
     suspend fun getAll(): List<RecurringItemEntity>
+    @Query("SELECT * FROM recurring_items WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): RecurringItemEntity?
+    @Query("SELECT * FROM recurring_items WHERE status = 'ACTIVE' AND nextDueDateEpochDay <= :today ORDER BY nextDueDateEpochDay")
+    suspend fun getDueActive(today: Long): List<RecurringItemEntity>
+    @Query("UPDATE recurring_items SET nextDueDateEpochDay = :nextDueDateEpochDay, updatedAtEpochMillis = :updatedAt WHERE id = :id")
+    suspend fun advanceDueDate(id: String, nextDueDateEpochDay: Long, updatedAt: Long)
+}
+
+@Dao
+interface BudgetDao {
+    @Query("SELECT * FROM budgets WHERE status = 'ACTIVE' ORDER BY category")
+    fun observeActive(): Flow<List<BudgetEntity>>
+    @Query("SELECT * FROM budgets ORDER BY category")
+    suspend fun getAll(): List<BudgetEntity>
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(value: BudgetEntity)
+    @Query("SELECT * FROM budgets WHERE category = :category LIMIT 1")
+    suspend fun getByCategory(category: String): BudgetEntity?
 }
 
 @Dao

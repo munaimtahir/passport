@@ -11,7 +11,7 @@ object DatabaseProvider {
     fun get(context: Context): AppDatabase = instance ?: synchronized(this) {
         instance ?: Room.databaseBuilder(context, AppDatabase::class.java, "passport.db")
             .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
-            .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+            .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
             .build().also { instance = it }
     }
 
@@ -72,6 +72,16 @@ object DatabaseProvider {
             db.execSQL("CREATE TABLE IF NOT EXISTS recurring_items (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, eventType TEXT NOT NULL, amountMinor INTEGER NOT NULL, currency TEXT NOT NULL, accountId TEXT NOT NULL, category TEXT, frequency TEXT NOT NULL, nextDueDateEpochDay INTEGER NOT NULL, status TEXT NOT NULL, autoCreateDraft INTEGER NOT NULL, createdAtEpochMillis INTEGER NOT NULL, updatedAtEpochMillis INTEGER NOT NULL)")
             db.execSQL("CREATE INDEX IF NOT EXISTS index_recurring_items_status ON recurring_items(status)")
             db.execSQL("CREATE INDEX IF NOT EXISTS index_recurring_items_nextDueDateEpochDay ON recurring_items(nextDueDateEpochDay)")
+        }
+    }
+
+    val MIGRATION_7_8: Migration = object : Migration(7, 8) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE goals ADD COLUMN currentAmountMinor INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE recurring_items ADD COLUMN anchorDayOfMonth INTEGER NOT NULL DEFAULT 1")
+            db.execSQL("CREATE TABLE IF NOT EXISTS budgets (id TEXT NOT NULL PRIMARY KEY, category TEXT NOT NULL, monthlyLimitMinor INTEGER NOT NULL, currency TEXT NOT NULL, status TEXT NOT NULL, createdAtEpochMillis INTEGER NOT NULL, updatedAtEpochMillis INTEGER NOT NULL)")
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_budgets_category ON budgets(category)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_budgets_status ON budgets(status)")
         }
     }
 }

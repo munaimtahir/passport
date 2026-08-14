@@ -50,4 +50,27 @@ class DatabaseMigrationTest {
             }
         }
     }
+
+    @Test
+    fun migrateV7ToV8PreservesExistingGoalsAndAddsBudgetsWithBackfilledDefaults() {
+        helper.createDatabase("migration-v7", 7).apply {
+            execSQL("INSERT INTO goals (id, title, goalType, targetAmountMinor, targetDateEpochDay, status) VALUES ('goal', 'Car', 'CUSTOM', 500000, NULL, 'OPEN')")
+            execSQL("INSERT INTO recurring_items (id, title, eventType, amountMinor, currency, accountId, category, frequency, nextDueDateEpochDay, status, autoCreateDraft, createdAtEpochMillis, updatedAtEpochMillis) VALUES ('rec', 'Rent', 'EXPENSE', 50000, 'PKR', 'acc', NULL, 'MONTHLY', 19000, 'ACTIVE', 1, 1, 1)")
+            close()
+        }
+
+        helper.runMigrationsAndValidate("migration-v7", 8, true, DatabaseProvider.MIGRATION_7_8).use { database ->
+            database.query("SELECT currentAmountMinor FROM goals WHERE id = 'goal'").use { cursor ->
+                cursor.moveToFirst()
+                check(cursor.getLong(0) == 0L) { "Pre-existing goals must backfill currentAmountMinor to zero" }
+            }
+            database.query("SELECT anchorDayOfMonth FROM recurring_items WHERE id = 'rec'").use { cursor ->
+                cursor.moveToFirst()
+                check(cursor.getInt(0) == 1) { "Pre-existing recurring items must backfill anchorDayOfMonth to 1" }
+            }
+            database.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'budgets'").use { cursor ->
+                check(cursor.moveToFirst())
+            }
+        }
+    }
 }

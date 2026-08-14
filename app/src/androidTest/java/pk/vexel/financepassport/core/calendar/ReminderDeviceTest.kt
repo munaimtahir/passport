@@ -24,6 +24,8 @@ import org.junit.runner.RunWith
 import org.junit.runners.model.Statement
 import pk.vexel.financepassport.core.database.AppDatabase
 import pk.vexel.financepassport.core.database.FinanceRepository
+import pk.vexel.financepassport.core.database.RecurringItemEntity
+import pk.vexel.financepassport.core.model.FinancialEventType
 
 @RunWith(AndroidJUnit4::class)
 class ReminderDeviceTest {
@@ -71,6 +73,47 @@ class ReminderDeviceTest {
         assertTrue(updated.dueAtEpochMillis > item.dueAtEpochMillis)
         assertEquals("OPEN", updated.status)
         WorkManager.getInstance(context).cancelUniqueWork("reminder-${item.id}")
+        database.close()
+    }
+
+    @Test
+    fun snoozePushesFromTheItemsOwnDueTimeRatherThanFromNow() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).allowMainThreadQueries().build()
+        val repository = FinanceRepository(database)
+        repository.addCalendarItem(context, "Renew CNIC", "OFFICIAL_RECORD", 5)
+        val item = database.calendarDao().getById(database.openHelper.writableDatabase.query("SELECT id FROM calendar_items LIMIT 1").use { cursor -> cursor.moveToFirst(); cursor.getString(0) }) ?: error("Reminder missing")
+        repository.snoozeCalendarItem(context, item.id, 3)
+        val snoozed = database.calendarDao().getById(item.id) ?: error("Reminder missing after snooze")
+        assertEquals(item.dueAtEpochMillis + 3 * 86_400_000L, snoozed.dueAtEpochMillis)
+        WorkManager.getInstance(context).cancelUniqueWork("reminder-${item.id}")
+        database.close()
+    }
+
+    @Test
+    fun processingDueRecurringItemRecordsDraftAndAdvancesToNextOccurrence() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).allowMainThreadQueries().build()
+        val repository = FinanceRepository(database)
+        repository.addAccount("Main", "CASH", 100_000)
+        val account = database.accountDao().getAll().single()
+        val today = java.time.LocalDate.now()
+        database.recurringItemDao().upsert(
+            RecurringItemEntity(
+                "rent", "Rent", FinancialEventType.EXPENSE.name, 50_000, "PKR", account.id, "Housing",
+                "MONTHLY", today.toEpochDay(), "ACTIVE", true, 1, 1, anchorDayOfMonth = 31,
+            )
+        )
+
+        repository.processDueRecurringItems(context)
+
+        val createdEvent = database.financialEventDao().getAll().singleOrNull { it.description == "Rent" }
+        assertTrue(createdEvent != null)
+        assertEquals(50_000L, createdEvent?.amountMinor)
+        val advanced = database.recurringItemDao().getAll().single()
+        assertTrue(advanced.nextDueDateEpochDay > today.toEpochDay())
+        assertEquals("ACTIVE", advanced.status)
+        WorkManager.getInstance(context).cancelUniqueWork("reminder-recurring-rent")
         database.close()
     }
 }

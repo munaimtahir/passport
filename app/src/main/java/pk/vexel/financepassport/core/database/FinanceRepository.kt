@@ -3,10 +3,18 @@ package pk.vexel.financepassport.core.database
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import pk.vexel.financepassport.core.model.FinancialEvent
 import pk.vexel.financepassport.core.model.FinancialEventType
 import pk.vexel.financepassport.core.model.Money
 import pk.vexel.financepassport.core.model.MinorUnits
+import pk.vexel.financepassport.core.model.CategoryBudgetStatus
+import pk.vexel.financepassport.core.model.GoalProgress
+import pk.vexel.financepassport.core.model.RecurringFrequency
+import pk.vexel.financepassport.core.model.calculateCategoryBudgets
+import pk.vexel.financepassport.core.model.calculateGoalProgress
+import pk.vexel.financepassport.core.model.advanceRecurringDueDate
+import pk.vexel.financepassport.core.model.toYearMonth
 import java.time.Instant
 import java.util.UUID
 import pk.vexel.financepassport.core.export.ExportSnapshot
@@ -52,8 +60,15 @@ class FinanceRepository(private val db: AppDatabase) {
     val taxIssues: Flow<List<TaxIssueEntity>> = db.taxIssueDao().observeAll()
     val reconciliations: Flow<List<WealthReconciliationEntity>> = db.reconciliationDao().observeAll()
     val recurringItems: Flow<List<RecurringItemEntity>> = db.recurringItemDao().observeActive()
+    val budgets: Flow<List<BudgetEntity>> = db.budgetDao().observeActive()
     val totals: Flow<Pair<Money, Money>> = combine(db.financialEventDao().observeIncomeMinor(), db.financialEventDao().observeExpenseMinor()) { income, expense ->
         Money(MinorUnits(income), "PKR") to Money(MinorUnits(expense), "PKR")
+    }
+    val currentMonthBudgetStatuses: Flow<List<CategoryBudgetStatus>> = combine(db.budgetDao().observeActive(), db.financialEventDao().observeActive()) { budgets, events ->
+        calculateCategoryBudgets(budgets, events, LocalDate.now().toYearMonth())
+    }
+    val goalProgress: Flow<List<Pair<GoalEntity, GoalProgress>>> = db.goalDao().observeAll().map { goals ->
+        goals.map { goal -> goal to calculateGoalProgress(goal.currentAmountMinor, goal.targetAmountMinor, goal.targetDateEpochDay) }
     }
 
     fun accountMovement(accountId: String): Flow<Long> = db.financialEventDao().observeAccountMovement(accountId)
@@ -121,6 +136,21 @@ class FinanceRepository(private val db: AppDatabase) {
         db.goalDao().upsert(GoalEntity(UUID.randomUUID().toString(), title.trim(), "CUSTOM", targetAmountMinor, null, "OPEN"))
     }
 
+    suspend fun contributeToGoal(id: String, amountMinor: Long) {
+        require(amountMinor > 0) { "Goal contribution must be positive" }
+        val goal = db.goalDao().getById(id) ?: error("Goal not found")
+        val updated = (goal.currentAmountMinor + amountMinor).coerceAtMost(goal.targetAmountMinor)
+        db.goalDao().updateProgress(id, updated, if (updated >= goal.targetAmountMinor) "ACHIEVED" else goal.status)
+    }
+
+    suspend fun addBudget(category: String, monthlyLimitMinor: Long, currency: String = "PKR") {
+        require(category.isNotBlank() && monthlyLimitMinor > 0) { "Budget details are invalid" }
+        val now = Instant.now().toEpochMilli()
+        val existing = db.budgetDao().getByCategory(category.trim())
+        val id = existing?.id ?: UUID.randomUUID().toString()
+        db.budgetDao().upsert(BudgetEntity(id, category.trim(), monthlyLimitMinor, currency, "ACTIVE", existing?.createdAtEpochMillis ?: now, now))
+    }
+
     suspend fun addOfficialRecord(type: String, title: String, identifier: String?) {
         val normalized = identifier?.trim()?.takeIf { it.isNotEmpty() }
         val encrypted = normalized?.let { KeystoreCryptoService().encrypt(it.toByteArray(), title.toByteArray()).let { value -> value.nonce + value.ciphertext } }
@@ -153,6 +183,16 @@ class FinanceRepository(private val db: AppDatabase) {
         ReminderScheduler(context).schedule(id, dueAt, item.reminderMinutesBefore, item.title, "Open Vexel Finance Passport to review this obligation.")
     }
 
+    /** Pushes a reminder's due time forward by [delayDays] from its own current due date, distinct from
+     * [rescheduleCalendarItem] which resets the delay relative to now. */
+    suspend fun snoozeCalendarItem(context: Context, id: String, delayDays: Long) {
+        require(delayDays > 0) { "Snooze delay must be positive" }
+        val item = db.calendarDao().getById(id) ?: error("Reminder not found")
+        val dueAt = item.dueAtEpochMillis + delayDays * 86_400_000L
+        db.calendarDao().updateSchedule(id, dueAt)
+        ReminderScheduler(context).schedule(id, dueAt, item.reminderMinutesBefore, item.title, "Open Vexel Finance Passport to review this obligation.")
+    }
+
     suspend fun addEvent(type: FinancialEventType, amountMinor: Long, accountId: String, description: String, category: String? = null, taxRelevance: String = "UNKNOWN") {
         val now = Instant.now().toEpochMilli()
         val eventId = UUID.randomUUID().toString()
@@ -175,7 +215,7 @@ class FinanceRepository(private val db: AppDatabase) {
         val now = Instant.now().toEpochMilli()
         val id = UUID.randomUUID().toString()
         val dueDate = LocalDate.now().plusDays(delayDays)
-        db.recurringItemDao().upsert(RecurringItemEntity(id, title.trim(), eventType.name, amountMinor, "PKR", accountId, category?.trim()?.takeIf { it.isNotEmpty() }, frequency, dueDate.toEpochDay(), "ACTIVE", true, now, now))
+        db.recurringItemDao().upsert(RecurringItemEntity(id, title.trim(), eventType.name, amountMinor, "PKR", accountId, category?.trim()?.takeIf { it.isNotEmpty() }, frequency, dueDate.toEpochDay(), "ACTIVE", true, now, now, dueDate.dayOfMonth))
         val dueAt = dueDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
         db.calendarDao().upsert(CalendarItemEntity("recurring-$id", "Recurring draft: ${title.trim()}", "RECURRING_DRAFT", dueAt, id, "OPEN", 0))
         ReminderScheduler(context).schedule("recurring-$id", dueAt, 0, "Recurring draft: ${title.trim()}", "Review and confirm this recurring ${eventType.name.lowercase()}.")
@@ -185,6 +225,28 @@ class FinanceRepository(private val db: AppDatabase) {
         db.recurringItemDao().pause(id, Instant.now().toEpochMilli())
         db.calendarDao().updateStatus("recurring-$id", "CANCELLED")
         ReminderScheduler(context).cancel("recurring-$id")
+    }
+
+    /**
+     * Fires every ACTIVE recurring item whose next due date has arrived: optionally records the
+     * draft financial event, then advances the schedule to its next occurrence and reschedules
+     * the reminder. Safe to call repeatedly (e.g. from a periodic worker) — items not yet due are untouched.
+     */
+    suspend fun processDueRecurringItems(context: Context) {
+        val today = LocalDate.now()
+        val due = db.recurringItemDao().getDueActive(today.toEpochDay())
+        for (item in due) {
+            if (item.autoCreateDraft) {
+                val type = runCatching { FinancialEventType.valueOf(item.eventType) }.getOrDefault(FinancialEventType.ADJUSTMENT)
+                addEvent(type, item.amountMinor, item.accountId, item.title, item.category, "UNKNOWN")
+            }
+            val frequency = runCatching { RecurringFrequency.valueOf(item.frequency) }.getOrNull() ?: continue
+            val nextDueDate = advanceRecurringDueDate(LocalDate.ofEpochDay(item.nextDueDateEpochDay), frequency, item.anchorDayOfMonth)
+            db.recurringItemDao().advanceDueDate(item.id, nextDueDate.toEpochDay(), Instant.now().toEpochMilli())
+            val dueAt = nextDueDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            db.calendarDao().upsert(CalendarItemEntity("recurring-${item.id}", "Recurring draft: ${item.title}", "RECURRING_DRAFT", dueAt, item.id, "OPEN", 0))
+            ReminderScheduler(context).schedule("recurring-${item.id}", dueAt, 0, "Recurring draft: ${item.title}", "Review and confirm this recurring ${item.eventType.lowercase()}.")
+        }
     }
 
     suspend fun transfer(sourceAccountId: String, destinationAccountId: String, amountMinor: Long, description: String) {
@@ -202,7 +264,7 @@ class FinanceRepository(private val db: AppDatabase) {
 
     fun toDomain(entity: FinancialEventEntity) = FinancialEvent(entity.id, runCatching { FinancialEventType.valueOf(entity.eventType) }.getOrDefault(FinancialEventType.ADJUSTMENT), Money(MinorUnits(kotlin.math.abs(entity.amountMinor)), entity.currency), entity.accountId, entity.dateEpochDay, entity.description)
 
-    suspend fun exportSnapshot() = ExportSnapshot(db.accountDao().getAll(), db.financialEventDao().getAll(), db.wealthDao().getAllAssets(), db.wealthDao().getAllLiabilities(), db.taxItemDao().getAll(), db.documentDao().getAll(), db.investmentDao().getAll(), db.receivableDao().getAll(), db.goalDao().getAll(), db.officialRecordDao().getAll())
+    suspend fun exportSnapshot() = ExportSnapshot(db.accountDao().getAll(), db.financialEventDao().getAll(), db.wealthDao().getAllAssets(), db.wealthDao().getAllLiabilities(), db.taxItemDao().getAll(), db.documentDao().getAll(), db.investmentDao().getAll(), db.receivableDao().getAll(), db.goalDao().getAll(), db.officialRecordDao().getAll(), db.budgetDao().getAll())
 
     suspend fun deleteAllData() { db.withTransaction { db.clearAllTables() } }
 
@@ -268,7 +330,7 @@ class FinanceRepository(private val db: AppDatabase) {
         val documents = db.documentDao().getAll().map { document ->
             BackupFile("documents/${File(document.localEncryptedPath).name}", File(document.localEncryptedPath).readBytes())
         }
-        val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size
+        val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size
         return try {
             BackupPackageService().create(snapshotFile.readBytes(), documents, BuildConfig.VERSION_NAME, 5, password, recordCount).payload
         } finally {

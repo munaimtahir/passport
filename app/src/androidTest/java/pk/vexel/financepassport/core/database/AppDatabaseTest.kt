@@ -158,6 +158,36 @@ class AppDatabaseTest {
     }
 
     @Test
+    fun goalContributionAccumulatesAndMarksAchievedWithoutExceedingTarget() = runBlocking {
+        val repository = FinanceRepository(database)
+        repository.addGoal("Emergency fund", 100_000)
+        val goal = database.goalDao().getAll().single()
+        repository.contributeToGoal(goal.id, 60_000)
+        assertEquals(60_000L, database.goalDao().getById(goal.id)?.currentAmountMinor)
+        assertEquals("OPEN", database.goalDao().getById(goal.id)?.status)
+        repository.contributeToGoal(goal.id, 60_000)
+        val achieved = database.goalDao().getById(goal.id)
+        assertEquals(100_000L, achieved?.currentAmountMinor) // clamped at target, contribution overshoot is not stored
+        assertEquals("ACHIEVED", achieved?.status)
+    }
+
+    @Test
+    fun budgetStatusReflectsOnlyCurrentMonthNonDeletedExpensesForItsCategory() = runBlocking {
+        val repository = FinanceRepository(database)
+        repository.addBudget("Food", 10_000)
+        val today = java.time.LocalDate.now().toEpochDay()
+        database.financialEventDao().insertAll(listOf(
+            FinancialEventEntity("in-month", "EXPENSE", today, 9_000, "PKR", null, "Food", "Groceries", null, "UNKNOWN", null, 1, 1),
+            FinancialEventEntity("wrong-category", "EXPENSE", today, 5_000, "PKR", null, "Fuel", "Petrol", null, "UNKNOWN", null, 1, 1),
+        ))
+        val statuses = repository.currentMonthBudgetStatuses.first()
+        val food = statuses.single { it.category == "Food" }
+        assertEquals(9_000L, food.spentMinor)
+        assertTrue(food.isNearThreshold)
+        assertTrue(!food.isOverBudget)
+    }
+
+    @Test
     fun accountBalanceAndEventCountUseDatabaseAggregates() = runBlocking {
         val repository = FinanceRepository(database)
         repository.addAccount("Main", "CASH", 100_000)

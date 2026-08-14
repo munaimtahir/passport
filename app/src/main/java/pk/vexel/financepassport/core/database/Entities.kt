@@ -110,6 +110,7 @@ data class GoalEntity(
     val targetAmountMinor: Long,
     val targetDateEpochDay: Long?,
     val status: String,
+    val currentAmountMinor: Long = 0,
 )
 
 @Entity(tableName = "recurring_items", indices = [Index("status"), Index("nextDueDateEpochDay")])
@@ -125,6 +126,19 @@ data class RecurringItemEntity(
     val nextDueDateEpochDay: Long,
     val status: String,
     val autoCreateDraft: Boolean,
+    val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long,
+    /** Day-of-month the schedule is anchored to; used to clamp month-end rollover without permanent drift. */
+    val anchorDayOfMonth: Int = 1,
+)
+
+@Entity(tableName = "budgets", indices = [Index("category", unique = true), Index("status")])
+data class BudgetEntity(
+    @PrimaryKey val id: String,
+    val category: String,
+    val monthlyLimitMinor: Long,
+    val currency: String,
+    val status: String,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
 )
