@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "event_types": [
+    {
+      "code": "EMPLOYMENT_INCOME",
+      "label": "Salary / employment income",
+      "default_evidence": [
+        "salary slip",
+        "annual salary certificate"
+      ]
+    },
+    {
+      "code": "BUSINESS_INCOME",
+      "label": "Business income",
+      "default_evidence": [
+        "income records",
+        "supporting statement"
+      ]
+    },
+    {
+      "code": "PROFESSIONAL_INCOME",
+      "label": "Professional / consultancy income",
+      "default_evidence": [
+        "invoice/receipt",
+        "payment evidence"
+      ]
+    },
+    {
+      "code": "RENTAL_INCOME",
+      "label": "Rental income",
+      "default_evidence": [
+        "rent agreement",
+        "receipt/bank evidence"
+      ]
+    },
+    {
+      "code": "BANK_PROFIT",
+      "label": "Bank profit",
+      "default_evidence": [
+        "profit certificate",
+        "withholding certificate"
+      ]
+    },
+    {
+      "code": "DIVIDEND",
+      "label": "Dividend / distribution",
+      "default_evidence": [
+        "dividend statement",
+        "broker/CDC evidence"
+      ]
+    },
+    {
+      "code": "CAPITAL_GAIN",
+      "label": "Capital gain",
+      "default_evidence": [
+        "broker statement",
+        "transaction records"
+      ]
+    },
+    {
+      "code": "CAPITAL_LOSS",
+      "label": "Capital loss",
+      "default_evidence": [
+        "broker statement",
+        "transaction records"
+      ]
+    },
+    {
+      "code": "TAX_WITHHELD",
+      "label": "Tax deducted / withheld",
+      "default_evidence": [
+        "withholding certificate",
+        "statement"
+      ]
+    },
+    {
+      "code": "ADVANCE_TAX",
+      "label": "Advance tax",
+      "default_evidence": [
+        "challan/certificate"
+      ]
+    },
+    {
+      "code": "TAX_PAYMENT",
+      "label": "Tax payment",
+      "default_evidence": [
+        "payment receipt/challan"
+      ]
+    },
+    {
+      "code": "ASSET_ACQUISITION",
+      "label": "Asset acquired",
+      "default_evidence": [
+        "purchase document",
+        "ownership document"
+      ]
+    },
+    {
+      "code": "ASSET_DISPOSAL",
+      "label": "Asset sold/disposed",
+      "default_evidence": [
+        "sale document",
+        "payment evidence"
+      ]
+    },
+    {
+      "code": "LIABILITY_CREATED",
+      "label": "Loan / liability created",
+      "default_evidence": [
+        "loan agreement",
+        "disbursement evidence"
+      ]
+    },
+    {
+      "code": "LIABILITY_REPAID",
+      "label": "Loan / liability repayment",
+      "default_evidence": [
+        "payment evidence"
+      ]
+    },
+    {
+      "code": "PERSONAL_EXPENDITURE",
+      "label": "Personal expenditure",
+      "default_evidence": []
+    },
+    {
+      "code": "DONATION",
+      "label": "Donation",
+      "default_evidence": [
+        "receipt"
+      ]
+    },
+    {
+      "code": "ZAKAT",
+      "label": "Zakat",
+      "default_evidence": [
+        "receipt/certificate"
+      ]
+    },
+    {
+      "code": "INSURANCE_PENSION",
+      "label": "Insurance / pension contribution",
+      "default_evidence": [
+        "certificate/statement"
+      ]
+    },
+    {
+      "code": "FOREIGN_INCOME",
+      "label": "Foreign income",
+      "default_evidence": [
+        "income statement",
+        "remittance/bank evidence"
+      ]
+    },
+    {
+      "code": "FOREIGN_ASSET",
+      "label": "Foreign asset",
+      "default_evidence": [
+        "ownership/statement"
+      ]
+    },
+    {
+      "code": "INVESTMENT_PURCHASE",
+      "label": "Investment purchase",
+      "default_evidence": [
+        "broker/transaction statement"
+      ]
+    },
+    {
+      "code": "INVESTMENT_SALE",
+      "label": "Investment sale",
+      "default_evidence": [
+        "broker/transaction statement"
+      ]
+    },
+    {
+      "code": "OTHER_INCOME",
+      "label": "Other income",
+      "default_evidence": []
+    },
+    {
+      "code": "OTHER_TAX_EVENT",
+      "label": "Other tax event",
+      "default_evidence": []
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+{
+  "product": "Vexel Finance Passport",
+  "repository_folder": "finance",
+  "application_id": "pk.vexel.financepassport",
+  "platform": "Android",
+  "architecture": "offline-first",
+  "min_sdk": 26,
+  "compile_sdk": 36,
+  "target_sdk": 36,
+  "base_currency": "PKR",
+  "primary_jurisdiction": "PK",
+  "core_modules": [
+    "onboarding",
+    "home",
+    "money",
+    "wealth",
+    "tax",
+    "records",
+    "vault",
+    "reports",
+    "backup",
+    "settings"
+  ],
+  "non_goals_mvp": [
+    "bank_credentials",
+    "payment_initiation",
+    "trading_execution",
+    "automatic_investment_advice",
+    "unauthorized_fbr_submission",
+    "mandatory_cloud",
+    "advertising"
+  ],
+  "tax_engine": {
+    "model": "continuous_capture",
+    "rules": "versioned",
+    "annual_draft": true,
+    "wealth_reconciliation": true,
+    "direct_submission_mvp": false
+  }
+}
