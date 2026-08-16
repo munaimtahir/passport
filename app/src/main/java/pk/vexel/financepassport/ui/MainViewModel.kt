@@ -55,7 +55,7 @@ class MainViewModel(private val repository: FinanceRepository) : ViewModel() {
     fun addCalendarItem(context: android.content.Context, title: String, kind: String, delayMinutes: Long) = viewModelScope.launch { repository.addCalendarItem(context, title, kind, delayMinutes) }
     fun updateCalendarStatus(context: android.content.Context, id: String, status: String) = viewModelScope.launch { repository.updateCalendarStatus(context, id, status) }
     fun rescheduleCalendarItem(context: android.content.Context, id: String, delayMinutes: Long) = viewModelScope.launch { repository.rescheduleCalendarItem(context, id, delayMinutes) }
-    fun deleteAllData() = viewModelScope.launch { repository.deleteAllData() }
+    fun deleteAllData(context: android.content.Context) = viewModelScope.launch { repository.deleteAllData(context) }
     fun prepareAnnualDraft() = viewModelScope.launch { draftMessage = runCatching { "Draft v${repository.prepareAnnualDraft().draftVersion} prepared" }.getOrElse { "Draft failed: ${it.message}" } }
     suspend fun getDraftLines(draftId: String) = repository.getDraftLines(draftId)
     fun calculateReconciliation() = viewModelScope.launch { reconciliationMessage = runCatching { "Unexplained difference: PKR ${repository.calculateCurrentReconciliation().unexplainedDifference.minorUnits.value / 100}" }.getOrElse { "Reconciliation failed: ${it.message}" } }

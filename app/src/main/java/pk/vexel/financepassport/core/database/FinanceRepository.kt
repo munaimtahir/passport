@@ -39,6 +39,7 @@ import pk.vexel.financepassport.core.security.BackupFile
 import pk.vexel.financepassport.core.security.BackupPackageService
 import pk.vexel.financepassport.core.security.KeystoreCryptoService
 import pk.vexel.financepassport.core.calendar.ReminderScheduler
+import androidx.work.WorkManager
 
 data class AccountBalance(val account: AccountEntity, val balance: Money)
 
@@ -193,10 +194,11 @@ class FinanceRepository(private val db: AppDatabase) {
         ReminderScheduler(context).schedule(id, dueAt, item.reminderMinutesBefore, item.title, "Open Vexel Finance Passport to review this obligation.")
     }
 
-    suspend fun addEvent(type: FinancialEventType, amountMinor: Long, accountId: String, description: String, category: String? = null, taxRelevance: String = "UNKNOWN") {
+    suspend fun addEvent(type: FinancialEventType, amountMinor: Long, accountId: String, description: String, category: String? = null, taxRelevance: String = "UNKNOWN", date: LocalDate = LocalDate.now()) {
+        require(amountMinor > 0) { "Amount must be greater than zero" }
+        require(db.accountDao().getById(accountId)?.status == "ACTIVE") { "Choose an active account" }
         val now = Instant.now().toEpochMilli()
         val eventId = UUID.randomUUID().toString()
-        val date = LocalDate.now()
         val event = FinancialEventEntity(eventId, type.name, date.toEpochDay(), amountMinor, "PKR", accountId, category?.trim()?.takeIf { it.isNotEmpty() }, description.trim(), null, taxRelevance, null, now, now)
         db.withTransaction {
             db.financialEventDao().upsert(event)
@@ -249,13 +251,15 @@ class FinanceRepository(private val db: AppDatabase) {
         }
     }
 
-    suspend fun transfer(sourceAccountId: String, destinationAccountId: String, amountMinor: Long, description: String) {
+    suspend fun transfer(sourceAccountId: String, destinationAccountId: String, amountMinor: Long, description: String, date: LocalDate = LocalDate.now()) {
         require(sourceAccountId != destinationAccountId) { "Transfer accounts must be different" }
         require(amountMinor > 0) { "Transfer amount must be positive" }
+        require(db.accountDao().getById(sourceAccountId)?.status == "ACTIVE") { "Choose an active source account" }
+        require(db.accountDao().getById(destinationAccountId)?.status == "ACTIVE") { "Choose an active destination account" }
         val now = Instant.now().toEpochMilli()
         val group = UUID.randomUUID().toString()
-        val out = FinancialEventEntity(UUID.randomUUID().toString(), "TRANSFER", LocalDate.now().toEpochDay(), -amountMinor, "PKR", sourceAccountId, null, description.trim(), null, "NOT_RELEVANT", null, now, now)
-        val incoming = FinancialEventEntity(UUID.randomUUID().toString(), "TRANSFER", LocalDate.now().toEpochDay(), amountMinor, "PKR", destinationAccountId, null, description.trim(), null, "NOT_RELEVANT", null, now, now)
+        val out = FinancialEventEntity(UUID.randomUUID().toString(), "TRANSFER", date.toEpochDay(), -amountMinor, "PKR", sourceAccountId, null, description.trim(), null, "NOT_RELEVANT", null, now, now)
+        val incoming = FinancialEventEntity(UUID.randomUUID().toString(), "TRANSFER", date.toEpochDay(), amountMinor, "PKR", destinationAccountId, null, description.trim(), null, "NOT_RELEVANT", null, now, now)
         db.withTransaction {
             db.financialEventDao().insertAll(listOf(out, incoming))
             db.transferLinkDao().insert(TransferLinkEntity(UUID.randomUUID().toString(), out.id, incoming.id, group))
@@ -266,7 +270,13 @@ class FinanceRepository(private val db: AppDatabase) {
 
     suspend fun exportSnapshot() = ExportSnapshot(db.accountDao().getAll(), db.financialEventDao().getAll(), db.wealthDao().getAllAssets(), db.wealthDao().getAllLiabilities(), db.taxItemDao().getAll(), db.documentDao().getAll(), db.investmentDao().getAll(), db.receivableDao().getAll(), db.goalDao().getAll(), db.officialRecordDao().getAll(), db.budgetDao().getAll())
 
-    suspend fun deleteAllData() { db.withTransaction { db.clearAllTables() } }
+    suspend fun deleteAllData(context: Context) {
+        db.withTransaction { db.clearAllTables() }
+        WorkManager.getInstance(context).cancelAllWork()
+        File(context.filesDir, "vault").deleteRecursively()
+        context.cacheDir.listFiles()?.filter { it.name.startsWith("passport-") || it.name.startsWith("restore-") || it.name.startsWith("passport-preview-") }?.forEach { it.deleteRecursively() }
+        File(context.applicationInfo.dataDir, "shared_prefs").listFiles()?.forEach { it.delete() }
+    }
 
     suspend fun updateTaxReview(id: String, state: String, reason: String? = null) {
         require(state in setOf("DRAFT", "CAPTURED", "NEEDS_EVIDENCE", "NEEDS_CLASSIFICATION", "REVIEWED", "INCLUDED", "EXCLUDED")) { "Invalid tax review state" }
@@ -300,9 +310,8 @@ class FinanceRepository(private val db: AppDatabase) {
         File(document.localEncryptedPath).delete()
     }
 
-    suspend fun addManualTaxItem(type: String, amountMinor: Long, description: String) {
+    suspend fun addManualTaxItem(type: String, amountMinor: Long, description: String, date: LocalDate = LocalDate.now()) {
         require(amountMinor > 0 && description.isNotBlank()) { "Tax item details are invalid" }
-        val date = LocalDate.now()
         val yearId = "PK-${date.year}"
         val now = Instant.now().toEpochMilli()
         db.withTransaction {
@@ -332,7 +341,7 @@ class FinanceRepository(private val db: AppDatabase) {
         }
         val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size
         return try {
-            BackupPackageService().create(snapshotFile.readBytes(), documents, BuildConfig.VERSION_NAME, 5, password, recordCount).payload
+            BackupPackageService().create(snapshotFile.readBytes(), documents, BuildConfig.VERSION_NAME, 8, password, recordCount).payload
         } finally {
             snapshotFile.delete()
         }

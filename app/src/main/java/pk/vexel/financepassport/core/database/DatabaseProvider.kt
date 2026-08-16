@@ -10,9 +10,13 @@ object DatabaseProvider {
 
     fun get(context: Context): AppDatabase = instance ?: synchronized(this) {
         instance ?: Room.databaseBuilder(context, AppDatabase::class.java, "passport.db")
-            .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
-            .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+            .addMigrations(*ALL_MIGRATIONS)
             .build().also { instance = it }
+    }
+
+    /** The one migration chain used by production, tests, validation, and restore opens. */
+    val ALL_MIGRATIONS: Array<Migration> by lazy {
+        arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
     }
 
     fun close() { synchronized(this) { instance?.close(); instance = null } }

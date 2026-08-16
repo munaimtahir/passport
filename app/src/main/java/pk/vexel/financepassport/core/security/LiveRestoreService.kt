@@ -46,7 +46,7 @@ class LiveRestoreService(private val context: Context, private val packageServic
         val validationFile = context.getDatabasePath(validationName)
         Files.copy(file.toPath(), validationFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
         val validation = Room.databaseBuilder(context, AppDatabase::class.java, validationName)
-            .addMigrations(DatabaseProvider.MIGRATION_1_2, DatabaseProvider.MIGRATION_2_3, DatabaseProvider.MIGRATION_3_4, DatabaseProvider.MIGRATION_4_5, DatabaseProvider.MIGRATION_5_6, DatabaseProvider.MIGRATION_6_7)
+            .addMigrations(*DatabaseProvider.ALL_MIGRATIONS)
             .build()
         try { validation.openHelper.writableDatabase } finally { validation.close(); validationFile.delete() }
     }
