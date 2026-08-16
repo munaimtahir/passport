@@ -2,6 +2,8 @@ package pk.vexel.financepassport.core.security
 
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.security.SecureRandom
 import javax.crypto.Cipher
@@ -13,6 +15,20 @@ import javax.crypto.spec.SecretKeySpec
 data class BackupEnvelope(val bytes: ByteArray)
 
 class PortableBackupCrypto(private val iterations: Int = 180_000) {
+    /** Encrypts without materialising the ZIP payload in memory. */
+    fun encrypt(input: InputStream, output: OutputStream, password: CharArray) {
+        require(password.size >= 8) { "Backup password must contain at least 8 characters" }
+        val salt = ByteArray(16).also(SecureRandom()::nextBytes)
+        val nonce = ByteArray(12).also(SecureRandom()::nextBytes)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, derive(password, salt), GCMParameterSpec(128, nonce))
+        cipher.updateAAD(HEADER)
+        output.write(HEADER)
+        output.write(ByteBuffer.allocate(4).putInt(iterations).array())
+        output.write(salt)
+        output.write(nonce)
+        javax.crypto.CipherOutputStream(output, cipher).use { encrypted -> input.copyTo(encrypted, DEFAULT_BUFFER_SIZE) }
+    }
     fun encrypt(payload: ByteArray, password: CharArray): BackupEnvelope {
         require(password.size >= 8) { "Backup password must contain at least 8 characters" }
         val salt = ByteArray(16).also(SecureRandom()::nextBytes)

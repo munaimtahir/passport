@@ -32,5 +32,7 @@ This is the working traceability matrix for the internal-release hardening pass.
 - Focused regression: `PkrMoneyInputTest` — PASS.
 - Corrections: strict whole-PKR parser/formatter; explicit event/recurring/transfer account selectors; active-account repository validation; selected-date support for events, transfers, and manual tax items; canonical migration array used by normal and restore validation; schema-8 backup manifest; guarded delete-all cleanup.
 - Write failures now pass through a ViewModel error channel and a generic actionable dialog without exposing exception text or discarding the form draft.
+- Backup creation now has a disk-streaming encrypted path with bounded copy buffers; the UI exports from a temporary file and does not retain the completed archive as a `ByteArray`. Legacy byte-array package APIs remain for compatibility tests.
+- Recurring processing is now a unique daily WorkManager job that advances reminders only. It cannot create a confirmed financial event automatically; the stale device test expectation was updated accordingly.
 - ADB/emulator/physical-device execution is intentionally deferred to Phase H; `adb devices` was checked and no device was connected. The final device script remains required.
 - Known non-failing warnings: Room processor-option warning, unstrippable `libandroidx.graphics.path.so`, and deprecated Compose `menuAnchor()` overload.

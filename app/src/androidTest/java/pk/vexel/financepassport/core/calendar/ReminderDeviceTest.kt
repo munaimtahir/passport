@@ -91,7 +91,7 @@ class ReminderDeviceTest {
     }
 
     @Test
-    fun processingDueRecurringItemRecordsDraftAndAdvancesToNextOccurrence() = runBlocking {
+    fun processingDueRecurringItemRemindsWithoutCreatingConfirmedEventAndAdvances() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).allowMainThreadQueries().build()
         val repository = FinanceRepository(database)
@@ -108,8 +108,7 @@ class ReminderDeviceTest {
         repository.processDueRecurringItems(context)
 
         val createdEvent = database.financialEventDao().getAll().singleOrNull { it.description == "Rent" }
-        assertTrue(createdEvent != null)
-        assertEquals(50_000L, createdEvent?.amountMinor)
+        assertTrue(createdEvent == null)
         val advanced = database.recurringItemDao().getAll().single()
         assertTrue(advanced.nextDueDateEpochDay > today.toEpochDay())
         assertEquals("ACTIVE", advanced.status)

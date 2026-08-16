@@ -18,4 +18,19 @@ class BackupPackageTest {
         assertTrue(File(staging, "database.snapshot").readBytes().contentEquals("database".toByteArray()))
         assertTrue(File(staging, "documents/a.enc").exists())
     }
+
+    @Test fun streamingPackageRestoresWithoutLoadingDocumentBytesIntoPackageApi() {
+        val root = Files.createTempDirectory("passport-streaming").toFile()
+        val database = File(root, "database.db").apply { writeText("database") }
+        val document = File(root, "a.enc").apply { writeBytes(byteArrayOf(1, 2, 3, 4)) }
+        val output = File(root, "backup.bin")
+        val staging = File(root, "staging")
+        val service = BackupPackageService(PortableBackupCrypto(100_000))
+        val manifest = service.createStreaming(database, listOf(BackupDiskFile("documents/a.enc", document)), "0.1", 8, "password".toCharArray(), 3, output)
+        val restored = service.restore(output.readBytes(), "password".toCharArray(), staging)
+        assertEquals(8, manifest.schemaVersion)
+        assertEquals(1, restored.documentCount)
+        assertTrue(File(staging, "documents/a.enc").readBytes().contentEquals(document.readBytes()))
+        root.deleteRecursively()
+    }
 }

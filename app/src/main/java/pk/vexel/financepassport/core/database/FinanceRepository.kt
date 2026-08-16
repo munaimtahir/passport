@@ -36,6 +36,7 @@ import java.nio.file.StandardCopyOption
 import android.database.sqlite.SQLiteException
 import pk.vexel.financepassport.BuildConfig
 import pk.vexel.financepassport.core.security.BackupFile
+import pk.vexel.financepassport.core.security.BackupDiskFile
 import pk.vexel.financepassport.core.security.BackupPackageService
 import pk.vexel.financepassport.core.security.KeystoreCryptoService
 import pk.vexel.financepassport.core.calendar.ReminderScheduler
@@ -238,10 +239,8 @@ class FinanceRepository(private val db: AppDatabase) {
         val today = LocalDate.now()
         val due = db.recurringItemDao().getDueActive(today.toEpochDay())
         for (item in due) {
-            if (item.autoCreateDraft) {
-                val type = runCatching { FinancialEventType.valueOf(item.eventType) }.getOrDefault(FinancialEventType.ADJUSTMENT)
-                addEvent(type, item.amountMinor, item.accountId, item.title, item.category, "UNKNOWN")
-            }
+            // A recurring rule may remind the user about a draft, but it must never
+            // create a confirmed financial fact without an explicit user action.
             val frequency = runCatching { RecurringFrequency.valueOf(item.frequency) }.getOrNull() ?: continue
             val nextDueDate = advanceRecurringDueDate(LocalDate.ofEpochDay(item.nextDueDateEpochDay), frequency, item.anchorDayOfMonth)
             db.recurringItemDao().advanceDueDate(item.id, nextDueDate.toEpochDay(), Instant.now().toEpochMilli())
@@ -342,6 +341,33 @@ class FinanceRepository(private val db: AppDatabase) {
         val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size
         return try {
             BackupPackageService().create(snapshotFile.readBytes(), documents, BuildConfig.VERSION_NAME, 8, password, recordCount).payload
+        } finally {
+            snapshotFile.delete()
+        }
+    }
+
+    /** Creates the portable backup on disk so the UI never retains the complete archive in memory. */
+    suspend fun createEncryptedBackupFile(context: Context, password: CharArray): File {
+        val snapshotFile = File(context.cacheDir, "passport-backup-${UUID.randomUUID()}.db")
+        val output = File(context.cacheDir, "passport-backup-${UUID.randomUUID()}.backup")
+        val escapedPath = snapshotFile.absolutePath.replace("'", "''")
+        try {
+            try {
+                db.openHelper.writableDatabase.execSQL("VACUUM INTO '$escapedPath'")
+            } catch (_: SQLiteException) {
+                val sqlite = db.openHelper.writableDatabase
+                sqlite.query("PRAGMA wal_checkpoint(TRUNCATE)").use { cursor -> while (cursor.moveToNext()) { } }
+                Files.copy(File(sqlite.path ?: error("Database path is unavailable")).toPath(), snapshotFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+            val documents = db.documentDao().getAll().map { document ->
+                BackupDiskFile("documents/${File(document.localEncryptedPath).name}", File(document.localEncryptedPath))
+            }
+            val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size
+            BackupPackageService().createStreaming(snapshotFile, documents, BuildConfig.VERSION_NAME, 8, password, recordCount, output)
+            return output
+        } catch (failure: Throwable) {
+            output.delete()
+            throw failure
         } finally {
             snapshotFile.delete()
         }

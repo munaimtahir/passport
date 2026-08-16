@@ -71,7 +71,7 @@ class MainViewModel(private val repository: FinanceRepository) : ViewModel() {
     fun addManualTaxItem(type: String, amountMinor: Long, description: String) = write { repository.addManualTaxItem(type, amountMinor, description) }
     fun linkDocument(documentId: String, entityType: String, entityId: String) = write { repository.linkDocument(documentId, entityType, entityId) }
     fun deleteDocument(documentId: String) = write { repository.deleteDocument(documentId) }
-    fun createBackup(context: android.content.Context, password: CharArray, onComplete: (Result<ByteArray>) -> Unit) = viewModelScope.launch { onComplete(runCatching { repository.createEncryptedBackup(context, password) }) }
+    fun createBackup(context: android.content.Context, password: CharArray, onComplete: (Result<java.io.File>) -> Unit) = viewModelScope.launch { onComplete(runCatching { repository.createEncryptedBackupFile(context, password) }) }
 }
 
 class MainViewModelFactory(private val repository: FinanceRepository) : androidx.lifecycle.ViewModelProvider.Factory {
