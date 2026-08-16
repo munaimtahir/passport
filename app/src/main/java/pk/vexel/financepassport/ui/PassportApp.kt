@@ -102,6 +102,9 @@ fun PassportApp() {
     }
     if (showAdd) AddAccountDialog(vm) { showAdd = false }
     if (showMore) MoreDialog(vm, application) { showMore = false }
+    vm.errorMessage?.let { message ->
+        AlertDialog(onDismissRequest = vm::clearError, title = { Text("Could not save") }, text = { Text(message) }, confirmButton = { TextButton(onClick = vm::clearError) { Text("OK") } })
+    }
 }
 
 @Composable

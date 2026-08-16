@@ -31,4 +31,6 @@ This is the working traceability matrix for the internal-release hardening pass.
 - Phase B rerun: `./gradlew clean test lint assembleDebug` — PASS (91 tasks, 2m24s).
 - Focused regression: `PkrMoneyInputTest` — PASS.
 - Corrections: strict whole-PKR parser/formatter; explicit event/recurring/transfer account selectors; active-account repository validation; selected-date support for events, transfers, and manual tax items; canonical migration array used by normal and restore validation; schema-8 backup manifest; guarded delete-all cleanup.
+- Write failures now pass through a ViewModel error channel and a generic actionable dialog without exposing exception text or discarding the form draft.
+- ADB/emulator/physical-device execution is intentionally deferred to Phase H; `adb devices` was checked and no device was connected. The final device script remains required.
 - Known non-failing warnings: Room processor-option warning, unstrippable `libandroidx.graphics.path.so`, and deprecated Compose `menuAnchor()` overload.
