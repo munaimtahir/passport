@@ -12,6 +12,7 @@ import pk.vexel.financepassport.core.database.AccountEntity
 import pk.vexel.financepassport.core.database.FinanceRepository
 import pk.vexel.financepassport.core.database.FinancialEventEntity
 import pk.vexel.financepassport.core.model.FinancialEventType
+import java.time.LocalDate
 
 class MainViewModel(private val repository: FinanceRepository) : ViewModel() {
     val accounts = repository.accounts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -44,10 +45,10 @@ class MainViewModel(private val repository: FinanceRepository) : ViewModel() {
     fun accountMovement(accountId: String) = repository.accountMovement(accountId)
     fun updateAccount(id: String, name: String, openingBalanceMinor: Long) = write { repository.updateAccount(id, name, openingBalanceMinor) }
     fun archiveAccount(id: String) = write { repository.archiveAccount(id) }
-    fun addEvent(type: FinancialEventType, amountMinor: Long, accountId: String, description: String, category: String? = null) = write { repository.addEvent(type, amountMinor, accountId, description, category) }
+    fun addEvent(type: FinancialEventType, amountMinor: Long, accountId: String, description: String, category: String? = null, date: LocalDate = LocalDate.now()) = write { repository.addEvent(type, amountMinor, accountId, description, category, date = date) }
     fun addRecurringItem(context: android.content.Context, title: String, type: FinancialEventType, amountMinor: Long, accountId: String, category: String?, frequency: String, delayDays: Long) = write { repository.addRecurringItem(context, title, type, amountMinor, accountId, category, frequency, delayDays) }
     fun pauseRecurringItem(context: android.content.Context, id: String) = write { repository.pauseRecurringItem(context, id) }
-    fun transfer(source: String, destination: String, amountMinor: Long, description: String) = write { repository.transfer(source, destination, amountMinor, description) }
+    fun transfer(source: String, destination: String, amountMinor: Long, description: String, date: LocalDate = LocalDate.now()) = write { repository.transfer(source, destination, amountMinor, description, date) }
     fun addAsset(title: String, valueMinor: Long) = write { repository.addAsset(title, "OTHER", valueMinor) }
     fun updateAssetValuation(id: String, valueMinor: Long) = write { repository.updateAssetValuation(id, valueMinor) }
     fun disposeAsset(id: String, valueMinor: Long) = write { repository.disposeAsset(id, valueMinor) }
@@ -68,7 +69,7 @@ class MainViewModel(private val repository: FinanceRepository) : ViewModel() {
     fun updateTaxReview(id: String, state: String, reason: String? = null) = write { repository.updateTaxReview(id, state, reason) }
     fun reviewTaxItem(id: String, taxEventType: String, state: String, reason: String?) = write { repository.reviewTaxItem(id, taxEventType, state, reason) }
     fun updateTaxEvidenceState(id: String, evidenceState: String) = write { repository.updateTaxEvidenceState(id, evidenceState) }
-    fun addManualTaxItem(type: String, amountMinor: Long, description: String) = write { repository.addManualTaxItem(type, amountMinor, description) }
+    fun addManualTaxItem(type: String, amountMinor: Long, description: String, date: LocalDate = LocalDate.now()) = write { repository.addManualTaxItem(type, amountMinor, description, date) }
     fun linkDocument(documentId: String, entityType: String, entityId: String) = write { repository.linkDocument(documentId, entityType, entityId) }
     fun deleteDocument(documentId: String) = write { repository.deleteDocument(documentId) }
     fun createBackup(context: android.content.Context, password: CharArray, onComplete: (Result<java.io.File>) -> Unit) = viewModelScope.launch { onComplete(runCatching { repository.createEncryptedBackupFile(context, password) }) }
