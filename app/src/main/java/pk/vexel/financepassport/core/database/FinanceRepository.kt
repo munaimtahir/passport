@@ -236,10 +236,8 @@ class FinanceRepository(private val db: AppDatabase) {
         val today = LocalDate.now()
         val due = db.recurringItemDao().getDueActive(today.toEpochDay())
         for (item in due) {
-            if (item.autoCreateDraft) {
-                val type = runCatching { FinancialEventType.valueOf(item.eventType) }.getOrDefault(FinancialEventType.ADJUSTMENT)
-                addEvent(type, item.amountMinor, item.accountId, item.title, item.category, "UNKNOWN")
-            }
+            // Recurring processing is deliberately non-posting. It advances the reminder and
+            // leaves an unconfirmed draft/review surface for explicit user confirmation.
             val frequency = runCatching { RecurringFrequency.valueOf(item.frequency) }.getOrNull() ?: continue
             val nextDueDate = advanceRecurringDueDate(LocalDate.ofEpochDay(item.nextDueDateEpochDay), frequency, item.anchorDayOfMonth)
             db.recurringItemDao().advanceDueDate(item.id, nextDueDate.toEpochDay(), Instant.now().toEpochMilli())

@@ -5,6 +5,26 @@ import org.junit.Test
 import java.math.BigDecimal
 
 class MoneyTest {
+    @Test fun wholePkrInputUsesExactMinorUnitsAndWesternGrouping() {
+        assertEquals(50_000L, MoneyInput.toMinorUnits("500"))
+        assertEquals(150_000L, MoneyInput.toMinorUnits("1,500"))
+        assertEquals("PKR 1,500,000", MoneyInput.formatMinorUnits(150_000_000L))
+    }
+
+    @Test fun signedAndLegacyFractionalValuesRemainAccurate() {
+        assertEquals("-PKR 1,500", MoneyInput.formatSignedMinorUnits(-150_000L))
+        assertEquals("PKR 1,500.50", MoneyInput.formatMinorUnits(150_050L))
+    }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun decimalInputIsRejected() { MoneyInput.toMinorUnits("1500.50") }
+
+    @Test(expected = IllegalArgumentException::class)
+    fun malformedGroupingIsRejected() { MoneyInput.toMinorUnits("15,00") }
+
+    @Test(expected = ArithmeticException::class)
+    fun rupeeToMinorOverflowIsRejected() { MoneyInput.toMinorUnits(Long.MAX_VALUE.toString()) }
+
     @Test fun arithmeticUsesExactMinorUnits() {
         assertEquals(Money.pkr(150), Money.pkr(100) + Money.pkr(50))
         assertEquals(Money.pkr(50), Money.pkr(100) - Money.pkr(50))
