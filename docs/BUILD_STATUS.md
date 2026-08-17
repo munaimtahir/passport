@@ -1,6 +1,6 @@
 # Build Status
 
-Updated: 2026-08-14
+Updated: 2026-08-17
 
 ## Current stage
 
@@ -41,11 +41,11 @@ Sprint 16 — release hardening and final evidence (in progress)
 
 - Build: `./gradlew test lint connectedDebugAndroidTest assembleRelease` PASS; release R8 build completed.
 - Release: locally debug-signed internal QA APK produced (not production-signed), SHA-256 `89716a2f792bb7189be9da2264102e6039298d38948963684f68dc425edffccc`.
-- Connected/device: `./gradlew connectedDebugAndroidTest` PASS (22 tests) on API 36 and PASS (22 tests) on API 26; current schema-v6 release APK assembles cleanly with no app crash scan hits.
+- Connected/device: `./gradlew connectedDebugAndroidTest` PASS (28 tests) on the attached API 26 emulator after hardening; debug APK install/launch and activity inspection pass. No physical Android device is attached in this environment.
 - Unit tests: `./gradlew test` PASS; backup manifest timestamp parsing has focused regression coverage.
 - Lint: `./gradlew lint` PASS.
-- Instrumentation: `./gradlew connectedDebugAndroidTest` PASS on `Android_16_Test` / API 36 (22 tests) and `Android_26_Test` / API 26 (22 tests), including account/salary and asset/liability capture through Compose UI, encrypted image/PDF preview rendering, primary navigation/accessibility semantics, full checked-in v2→v6 Room migration validation, persisted tax-issue/source traceability, annual draft-line source traceability, account/wealth lifecycle, tax review/reclassification, database-side balance/count aggregates, encrypted document deletion/link cleanup, populated encrypted restore, notification firing, and reminder rescheduling.
-- Device: `Android_16_Test` API 36 and `Android_26_Test` API 26; release APK install/launch PASS on both APIs; notification channel `passport_reminders` exists on API 36; no app crash observed.
+- Instrumentation: 28/28 PASS on `Android_26_Test` / API 26, including migration, backup/restore, tax traceability, wealth lifecycle, encrypted vault preview, notifications, navigation, and recurring draft behavior. API 36 and physical-device reruns remain pending.
+- Device: attached `Android_26_Test` API 26; debug APK install/launch PASS, `MainActivity` present, crash scan found no app `FATAL EXCEPTION`. Physical device unavailable.
 
 ## Blockers and next action
 

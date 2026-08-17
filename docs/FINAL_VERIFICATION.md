@@ -1,6 +1,6 @@
 # Final Verification
 
-Date: 2026-08-14
+Date: 2026-08-17
 
 ## Verdict
 
@@ -23,7 +23,7 @@ Sprint 00 is PASS. Sprints 01–16 are PARTIAL; individual gate reports are in `
 ## Verification executed
 
 - `./gradlew test lint` — PASS
-- `./gradlew connectedDebugAndroidTest` — PASS, 22 tests on `Android_16_Test` / API 36; PASS, 22 tests on `Android_26_Test` / API 26
+- `./gradlew connectedDebugAndroidTest` — PASS, 28 tests on attached `Android_26_Test` / API 26; API 36 and physical-device execution were unavailable in this run
 - `./gradlew assembleRelease` — PASS with R8; debug signing only; API 26 WAL fallback regression fixed
 - Release APK install/launch — PASS on API 36 and API 26; no app-package fatal crash observed
 - Notification channel inspection — PASS for `passport_reminders`
@@ -40,6 +40,8 @@ PIN/PBKDF2 lock, optional BiometricPrompt, lifecycle relock, Keystore AES-GCM, `
 - The report catalog is available through More, with all implemented report types and source identifiers in report lines. CSV UI remains events-only; reconciliation history and evidence issue workflows remain incomplete.
 - Compose acceptance coverage includes launch, primary-destination navigation, and key content-description semantics on API 26 and API 36. Manual API 36 smoke with font scale 1.3 and forced rotation preserved `MainActivity` without a fatal exception; TalkBack, visual review, performance, and full device-flow evidence remain pending.
 - Permanent production signing key and final privacy/branding release inputs are unavailable.
+- Whole-PKR input, explicit account/transfer selectors, shared migration registration through v8, non-posting recurring processing, write-error UI state, and accidental root Git-artifact cleanup were hardened in the 2026-08-17 worktree.
+- Remaining internal-release blockers are bounded-memory backup streaming, broader historical-date capture, complete report/backup UI walkthroughs, accessibility/font-scale evidence, recurring periodic-worker evidence, API 36 rerun, and physical-device testing.
 
 ## Release artifacts
 

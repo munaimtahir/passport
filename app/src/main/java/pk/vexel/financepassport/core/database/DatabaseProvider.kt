@@ -14,11 +14,6 @@ object DatabaseProvider {
             .build().also { instance = it }
     }
 
-    /** The one migration chain used by production, tests, validation, and restore opens. */
-    val ALL_MIGRATIONS: Array<Migration> by lazy {
-        arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
-    }
-
     fun close() { synchronized(this) { instance?.close(); instance = null } }
 
     val MIGRATION_1_2: Migration = object : Migration(1, 2) {
@@ -88,4 +83,10 @@ object DatabaseProvider {
             db.execSQL("CREATE INDEX IF NOT EXISTS index_budgets_status ON budgets(status)")
         }
     }
+
+    /** The single migration registry used by production and restore validation. */
+    val ALL_MIGRATIONS = arrayOf(
+        MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
+        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+    )
 }

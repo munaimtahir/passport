@@ -8,6 +8,9 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeUp
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.util.UUID
@@ -32,7 +35,8 @@ class RecurringDraftDeviceTest {
         accountFields[1].performTextInput("100000")
         composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Recurring Test Account", useUnmergedTree = true).assertIsDisplayed()
-        composeRule.onAllNodesWithText("Add", useUnmergedTree = true)[0].performClick()
+        repeat(6) { composeRule.onNodeWithTag("money-list", useUnmergedTree = true).performTouchInput { swipeUp() } }
+        composeRule.onNodeWithTag("add-recurring", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Add recurring draft", useUnmergedTree = true).assertIsDisplayed()
 
         val title = "Monthly draft ${UUID.randomUUID().toString().take(8)}"
