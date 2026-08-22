@@ -12,9 +12,16 @@ import pk.vexel.financepassport.core.database.AccountEntity
 import pk.vexel.financepassport.core.database.FinanceRepository
 import pk.vexel.financepassport.core.database.FinancialEventEntity
 import pk.vexel.financepassport.core.model.FinancialEventType
+import pk.vexel.financepassport.core.security.AppPreferences
 import java.time.LocalDate
 
-class MainViewModel(private val repository: FinanceRepository) : ViewModel() {
+class MainViewModel(private val repository: FinanceRepository, private val preferences: AppPreferences) : ViewModel() {
+    var privacyModeEnabled by mutableStateOf(preferences.isPrivacyModeEnabled())
+        private set
+    fun togglePrivacyMode() {
+        privacyModeEnabled = !privacyModeEnabled
+        preferences.setPrivacyMode(privacyModeEnabled)
+    }
     val accounts = repository.accounts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val recentEvents = repository.recentEvents.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val activeEventCount = repository.activeEventCount.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
@@ -75,7 +82,7 @@ class MainViewModel(private val repository: FinanceRepository) : ViewModel() {
     fun createBackup(context: android.content.Context, password: CharArray, onComplete: (Result<java.io.File>) -> Unit) = viewModelScope.launch { onComplete(runCatching { repository.createEncryptedBackupFile(context, password) }) }
 }
 
-class MainViewModelFactory(private val repository: FinanceRepository) : androidx.lifecycle.ViewModelProvider.Factory {
+class MainViewModelFactory(private val repository: FinanceRepository, private val preferences: AppPreferences) : androidx.lifecycle.ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T = MainViewModel(repository) as T
+    override fun <T : ViewModel> create(modelClass: Class<T>): T = MainViewModel(repository, preferences) as T
 }

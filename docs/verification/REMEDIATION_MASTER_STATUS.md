@@ -30,8 +30,8 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | Sprint | Audit status (2026-08-22) | Remediation phase | Current status | Notes |
 | --- | --- | --- | --- | --- |
 | 0 Foundation | PARTIAL | Phase 0 | VERIFIED — HOST | Build/unit/lint green; install/launch/device gate deferred to Phase 10 |
-| 1 Design/nav/onboarding | PARTIAL | Phase 1 | NOT IMPLEMENTED (onboarding), IMPLEMENTED — DEVICE VERIFICATION DEFERRED (nav/theme) | Onboarding flow, privacy masking, historical date pickers targeted this phase |
-| 2 Local data | PARTIAL | Phase 1/2 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Schema v8 migrations verified by JVM test; date-entry UI absent |
+| 1 Design/nav/onboarding | PARTIAL | Phase 1 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Onboarding flow (`Onboarding.kt`), global privacy masking (`AppPreferences`, `LocalPrivacyMode`), and a reusable `DateField` landed this phase; see Phase 1 log row for what remains |
+| 2 Local data | PARTIAL | Phase 1/2 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Schema v8 migrations verified by JVM test; income/expense/transfer forms now use `DateField` instead of a silent `LocalDate.now()` default; most other historical-date entry points remain for Phase 2 |
 | 3 Security | PARTIAL | Phase 8 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | PIN/biometric/Keystore exist; full lifecycle/device evidence deferred |
 | 4 Money | PARTIAL | Phase 2 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Accounts/transfers work; historical dates, recurring UI gaps targeted |
 | 5 Wealth | PARTIAL | Phase 2 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Domain math exists; valuation/disposal/repayment UI mostly dormant |
@@ -44,15 +44,15 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 12 Reports | PARTIAL | Phase 7 | NOT IMPLEMENTED (preview/full catalog) | Export-only; no in-app preview; raw `/100` formatting |
 | 13 Backup/restore | PARTIAL | Phase 7 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Crypto/staging done; equivalence proof needs device (Phase 10D) |
 | 14 Calendar | PARTIAL | Phase 7 | NOT IMPLEMENTED (expiry/due-date wiring) | Generic reminders exist; document/receivable/tax-review linkage absent |
-| 15 UX hardening | PARTIAL | Phase 1/8 | NOT IMPLEMENTED (masking, a11y) | Targeted across Phase 1 (masking) and Phase 8 (a11y/adaptive review) |
+| 15 UX hardening | PARTIAL | Phase 1/8 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED (masking); NOT IMPLEMENTED (a11y) | Global privacy masking landed in Phase 1; a11y/adaptive review remains Phase 8 |
 | 16 Release | PARTIAL | Phase 8/9 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Debug-signed internal QA build exists; device/physical evidence deferred |
 
 ## Phase execution log
 
 | Phase | Status | Commit | Notes |
 | --- | --- | --- | --- |
-| 0 — Baseline freeze | IN PROGRESS | (pending) | This document created; host baseline re-verified green |
-| 1 — Onboarding/dates/privacy/UI foundation | NOT STARTED | — | Next |
+| 0 — Baseline freeze | DONE | `febea67` | This document created; host baseline re-verified green |
+| 1 — Onboarding/dates/privacy/UI foundation | DONE (scoped) | (pending — see below) | See detail below |
 | 2 — Canonical money/wealth completion | NOT STARTED | — | |
 | 3 — Canonical home dashboard | NOT STARTED | — | |
 | 4 — Versioned tax capture engine | NOT STARTED | — | |
@@ -64,3 +64,54 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 10 — Deferred device qualification | NOT STARTED (explicitly deferred) | — | Requires emulator/device environment |
 
 This table is updated at the end of every phase in this remediation run.
+
+## Phase 1 detail
+
+**Note on provenance:** the bulk of this phase's diff (`AppPreferences.kt`, `Onboarding.kt`,
+`DateField.kt`, and the wiring into `MainActivity.kt`/`PassportApplication.kt`/
+`MainViewModel.kt`/`PassportApp.kt`) was found already present, uncommitted, in the working
+tree at the start of this remediation run — left over from an earlier interrupted session, not
+written by this run's Phase 1 pass. This run verified it (host gate green), extended it, fixed a
+regression it introduced, and is committing it as Phase 1 of this ledger.
+
+Landed:
+
+- Global privacy masking (1C): `AppPreferences` (SharedPreferences-backed, non-sensitive) persists
+  a privacy-mode flag; `MainViewModel.privacyModeEnabled`/`togglePrivacyMode()` exposes it; a
+  `LocalPrivacyMode` composition local plus a `MaskedPkr` helper is wired into every amount shown
+  on Home, Money, and Wealth (accounts, events, recurring drafts, assets, liabilities, investments,
+  receivables, goals); an eye icon in the top app bar toggles it.
+- Historical date architecture (1B), partial: a reusable `DateField` composable (Material3
+  `DatePickerDialog` backed by `java.time.LocalDate`) now replaces the silent `LocalDate.now()`
+  default in the income/expense and transfer entry dialogs (`FinanceRepository.addEvent`/`transfer`
+  already accepted an explicit date parameter; only the UI wiring was missing, matching the audit
+  finding). Asset/liability/investment/receivable/document/official-record date entry points were
+  **not** touched this phase — they remain Phase 2/6 work.
+- Onboarding (1A), partial: a real 3-page `OnboardingGate`/`OnboardingFlow` (welcome → privacy/
+  offline explanation → PKR/PIN handoff) gates `MainActivity` before `SecurityGate`, persisted via
+  `AppPreferences.isOnboardingComplete()`. Guided account setup (seed a bank/cash/investment
+  account or start empty) was **not** implemented — onboarding hands off directly to PIN creation.
+  Re-showing onboarding after delete-all was not independently verified: `deleteAllData` already
+  deletes the whole `shared_prefs` directory (pre-existing behavior, not new this phase), which
+  should include `passport_app_prefs`, but whether an already-constructed `AppPreferences`/
+  `SharedPreferences` instance picks that up without a process restart is a runtime question left
+  for Phase 10 device qualification, not re-verified here.
+- Demo synthetic data (1E): **not implemented this phase** — deprioritized below 1A–1C per this
+  phase's own scoping, and not picked up given the regression fix below took priority.
+
+Regression found and fixed (not device-observed — found by static reading of test bodies):
+inserting `OnboardingGate` in front of `SecurityGate` means a fresh install now shows onboarding
+before the "Vexel Finance Passport" title / "Create PIN" / "Unlock" text that four existing
+instrumentation tests (`NavigationSmokeTest`, `MoneyCaptureDeviceTest`, `RecurringDraftDeviceTest`,
+`WealthCaptureDeviceTest`) assert on immediately. Added a `dismissOnboardingIfPresent()` helper
+(loops clicking the `onboarding-next`-tagged button while present) to all four, called before
+their existing PIN/unlock handling. Not run on a device this session (Phase 10 will confirm).
+
+Added test coverage: `AppPreferencesTest` (androidTest) — onboarding/privacy default state and
+persistence across a fresh `AppPreferences` instance. No JVM-level test was added for
+`AppPreferences` because it requires an Android `Context` (SharedPreferences) and the project has
+no Robolectric dependency; adding one was judged out of scope for this phase.
+
+Verification: `./gradlew test lint` PASS (BUILD SUCCESSFUL, 2026-08-23); `./gradlew
+assembleDebugAndroidTest` PASS (androidTest sources compile, not run). No emulator/device
+available this session — all of the above is host-side/static verification only.

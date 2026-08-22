@@ -8,6 +8,7 @@ import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import pk.vexel.financepassport.ui.OnboardingGate
 import pk.vexel.financepassport.ui.PassportApp
 import pk.vexel.financepassport.ui.SecurityGate
 import pk.vexel.financepassport.ui.theme.PassportTheme
@@ -17,10 +18,11 @@ class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        val preferences = (application as PassportApplication).preferences
         setContent {
             PassportTheme {
                 Surface(color = MaterialTheme.colorScheme.background) {
-                    SecurityGate { PassportApp() }
+                    OnboardingGate(preferences) { SecurityGate { PassportApp() } }
                 }
             }
         }

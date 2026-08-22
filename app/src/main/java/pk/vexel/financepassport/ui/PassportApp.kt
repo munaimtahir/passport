@@ -22,6 +22,8 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -45,6 +47,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -78,32 +82,47 @@ private val destinations = listOf(
     Destination("Vault", Icons.Default.Folder),
 )
 
+/** Whether monetary values should render masked; toggled from the top app bar and persisted in [pk.vexel.financepassport.core.security.AppPreferences]. */
+val LocalPrivacyMode = compositionLocalOf { false }
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PassportApp() {
     val application = LocalContext.current.applicationContext as PassportApplication
-    val vm: MainViewModel = viewModel(factory = MainViewModelFactory(application.repository))
+    val vm: MainViewModel = viewModel(factory = MainViewModelFactory(application.repository, application.preferences))
     var selected by rememberSaveable { mutableIntStateOf(0) }
     var showAdd by rememberSaveable { mutableStateOf(false) }
     var showMore by rememberSaveable { mutableStateOf(false) }
-    Scaffold(
-        topBar = { TopAppBar(title = { Text("Vexel Finance Passport") }, actions = { IconButton(onClick = { showMore = true }) { Icon(Icons.Default.MoreHoriz, "More") } }) },
-        floatingActionButton = { if (selected == 1) FloatingActionButton(onClick = { showAdd = true }) { Icon(Icons.Default.Add, "Add") } },
-        bottomBar = { NavigationBar { destinations.forEachIndexed { index, destination -> NavigationBarItem(selected == index, { selected = index }, icon = { Icon(destination.icon, destination.label) }, label = { Text(destination.label) }) } } },
-    ) { padding ->
-        when (selected) {
-            0 -> HomeScreen(vm, application, padding)
-            1 -> MoneyScreen(vm, application, padding)
-            2 -> WealthScreen(vm, padding)
-            3 -> TaxScreen(vm, padding)
-            4 -> VaultScreen(vm, application, padding)
-            else -> EmptyModuleScreen(destinations[selected].label, padding)
+    CompositionLocalProvider(LocalPrivacyMode provides vm.privacyModeEnabled) {
+        Scaffold(
+            topBar = {
+                TopAppBar(title = { Text("Vexel Finance Passport") }, actions = {
+                    IconButton(onClick = vm::togglePrivacyMode) {
+                        Icon(
+                            if (vm.privacyModeEnabled) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                            contentDescription = if (vm.privacyModeEnabled) "Show amounts" else "Hide amounts",
+                        )
+                    }
+                    IconButton(onClick = { showMore = true }) { Icon(Icons.Default.MoreHoriz, "More") }
+                })
+            },
+            floatingActionButton = { if (selected == 1) FloatingActionButton(onClick = { showAdd = true }) { Icon(Icons.Default.Add, "Add") } },
+            bottomBar = { NavigationBar { destinations.forEachIndexed { index, destination -> NavigationBarItem(selected == index, { selected = index }, icon = { Icon(destination.icon, destination.label) }, label = { Text(destination.label) }) } } },
+        ) { padding ->
+            when (selected) {
+                0 -> HomeScreen(vm, application, padding)
+                1 -> MoneyScreen(vm, application, padding)
+                2 -> WealthScreen(vm, padding)
+                3 -> TaxScreen(vm, padding)
+                4 -> VaultScreen(vm, application, padding)
+                else -> EmptyModuleScreen(destinations[selected].label, padding)
+            }
         }
-    }
-    if (showAdd) AddAccountDialog(vm) { showAdd = false }
-    if (showMore) MoreDialog(vm, application) { showMore = false }
-    vm.errorMessage?.let { message ->
-        AlertDialog(onDismissRequest = vm::clearError, title = { Text("Could not save") }, text = { Text(message) }, confirmButton = { TextButton(onClick = vm::clearError) { Text("OK") } })
+        if (showAdd) AddAccountDialog(vm) { showAdd = false }
+        if (showMore) MoreDialog(vm, application) { showMore = false }
+        vm.errorMessage?.let { message ->
+            AlertDialog(onDismissRequest = vm::clearError, title = { Text("Could not save") }, text = { Text(message) }, confirmButton = { TextButton(onClick = vm::clearError) { Text("OK") } })
+        }
     }
 }
 
@@ -159,14 +178,14 @@ private fun HomeScreen(vm: MainViewModel, application: PassportApplication, padd
     var rescheduleTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.CalendarItemEntity?>(null) }
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { Text("Your financial passport", style = MaterialTheme.typography.headlineSmall) }
-        item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp), Arrangement.spacedBy(6.dp)) { Text("Net recorded movement", style = MaterialTheme.typography.labelLarge); Text(formatPkr((totals?.first?.minorUnits?.value ?: 0L) - (totals?.second?.minorUnits?.value ?: 0L)), style = MaterialTheme.typography.displaySmall); Text("Based on ${accounts.size} active account(s) and $activeEventCount recorded event(s).") } } }
+        item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp), Arrangement.spacedBy(6.dp)) { Text("Net recorded movement", style = MaterialTheme.typography.labelLarge); Text(MaskedPkr((totals?.first?.minorUnits?.value ?: 0L) - (totals?.second?.minorUnits?.value ?: 0L)), style = MaterialTheme.typography.displaySmall); Text("Based on ${accounts.size} active account(s) and $activeEventCount recorded event(s).") } } }
         item { Text("Tax-year readiness", style = MaterialTheme.typography.titleLarge) }
         item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp), Arrangement.spacedBy(6.dp)) { Text("Capture once, keep evidence linked."); Text("Your local records remain available without internet.") } } }
         item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Upcoming obligations", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showCalendarAdd = true }) { Text("Add") } } }
         if (calendarItems.isEmpty()) item { Text("No reminders scheduled.") }
         items(calendarItems.take(5), key = { it.id }) { reminder -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(reminder.title, style = MaterialTheme.typography.titleMedium); Text(reminder.kind); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = { rescheduleTarget = reminder }) { Text("Reschedule") }; TextButton(onClick = { vm.updateCalendarStatus(application, reminder.id, "COMPLETED") }) { Text("Complete") }; TextButton(onClick = { vm.updateCalendarStatus(application, reminder.id, "CANCELLED") }) { Text("Cancel") } } } } }
         item { Text("Recent activity", style = MaterialTheme.typography.titleLarge) }
-        items(recentEvents.take(5), key = { it.id }) { event -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(event.description); Text(formatPkr(event.amountMinor)) } }
+        items(recentEvents.take(5), key = { it.id }) { event -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(event.description); Text(MaskedPkr(event.amountMinor)) } }
     }
     if (showCalendarAdd) CalendarItemDialog(vm, application) { showCalendarAdd = false }
     rescheduleTarget?.let { reminder -> RescheduleDialog(reminder, vm, application) { rescheduleTarget = null } }
@@ -202,9 +221,9 @@ private fun MoneyScreen(vm: MainViewModel, application: PassportApplication, pad
         item { Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) { Button(onClick = { showEvent = true }, enabled = accounts.isNotEmpty(), modifier = Modifier.weight(1f)) { Text("Income / expense") }; Button(onClick = { showTransfer = true }, enabled = accounts.size >= 2, modifier = Modifier.weight(1f)) { Text("Transfer") } } }
         item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Recurring drafts", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showRecurring = true }, enabled = accounts.isNotEmpty()) { Text("Add") } } }
         if (recurringItems.isEmpty()) item { Text("No recurring drafts. Add one to receive a reminder without silently creating a confirmed event.") }
-        items(recurringItems, key = { it.id }) { recurring -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text(recurring.title, style = MaterialTheme.typography.titleMedium); Text("${recurring.eventType} · ${formatPkr(recurring.amountMinor)} · ${recurring.frequency}"); Text("Next draft reminder: ${java.time.LocalDate.ofEpochDay(recurring.nextDueDateEpochDay)}"); TextButton(onClick = { vm.pauseRecurringItem(application, recurring.id) }) { Text("Pause") } } } }
+        items(recurringItems, key = { it.id }) { recurring -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text(recurring.title, style = MaterialTheme.typography.titleMedium); Text("${recurring.eventType} · ${MaskedPkr(recurring.amountMinor)} · ${recurring.frequency}"); Text("Next draft reminder: ${java.time.LocalDate.ofEpochDay(recurring.nextDueDateEpochDay)}"); TextButton(onClick = { vm.pauseRecurringItem(application, recurring.id) }) { Text("Pause") } } } }
         item { Text("Activity", style = MaterialTheme.typography.titleLarge) }
-        items(recentEvents, key = { it.id }) { event -> Card(Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp), Arrangement.SpaceBetween) { Column { Text(event.description); Text(listOfNotNull(event.eventType, event.category).joinToString(" · "), style = MaterialTheme.typography.labelSmall) }; Text(formatPkr(event.amountMinor)) } } }
+        items(recentEvents, key = { it.id }) { event -> Card(Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp), Arrangement.SpaceBetween) { Column { Text(event.description); Text(listOfNotNull(event.eventType, event.category).joinToString(" · "), style = MaterialTheme.typography.labelSmall) }; Text(MaskedPkr(event.amountMinor)) } } }
     }
     if (showEvent) AddEventDialog(vm, accounts) { showEvent = false }
     if (showTransfer) TransferDialog(vm, accounts) { showTransfer = false }
@@ -313,22 +332,22 @@ private fun WealthScreen(vm: MainViewModel, padding: PaddingValues) {
     var receivablePaymentTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.ReceivableEntity?>(null) }
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("Wealth", style = MaterialTheme.typography.headlineMedium) }
-        item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text("Recorded net wealth", style = MaterialTheme.typography.labelLarge); Text(formatPkr(assetTotal - liabilityTotal), style = MaterialTheme.typography.headlineLarge); Text("Assets ${formatPkr(assetTotal)} · Liabilities ${formatPkr(liabilityTotal)}") } } }
+        item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text("Recorded net wealth", style = MaterialTheme.typography.labelLarge); Text(MaskedPkr(assetTotal - liabilityTotal), style = MaterialTheme.typography.headlineLarge); Text("Assets ${MaskedPkr(assetTotal)} · Liabilities ${MaskedPkr(liabilityTotal)}") } } }
         item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Assets", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showAdd = true }) { Text("Add") } } }
         if (assets.isEmpty()) item { Text("No assets recorded yet.") }
-        items(assets, key = { it.id }) { asset -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(asset.title, style = MaterialTheme.typography.titleMedium); Text("${asset.type} · current ${formatPkr(asset.currentEstimatedValueMinor)} · acquired ${formatPkr(asset.acquisitionCostMinor)}"); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = { valuationTarget = asset }) { Text("Update value") }; TextButton(onClick = { disposalTarget = asset }) { Text("Dispose") } } } } }
+        items(assets, key = { it.id }) { asset -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(asset.title, style = MaterialTheme.typography.titleMedium); Text("${asset.type} · current ${MaskedPkr(asset.currentEstimatedValueMinor)} · acquired ${MaskedPkr(asset.acquisitionCostMinor)}"); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = { valuationTarget = asset }) { Text("Update value") }; TextButton(onClick = { disposalTarget = asset }) { Text("Dispose") } } } } }
         item { Text("Liabilities", style = MaterialTheme.typography.titleLarge) }
         if (liabilities.isEmpty()) item { Text("No liabilities recorded yet.") }
-        items(liabilities, key = { it.id }) { liability -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(liability.title, style = MaterialTheme.typography.titleMedium); Text("${liability.type} · outstanding ${formatPkr(liability.outstandingAmountMinor)} of ${formatPkr(liability.originalAmountMinor)}"); TextButton(onClick = { liabilityPaymentTarget = liability }) { Text("Record repayment") } } } }
+        items(liabilities, key = { it.id }) { liability -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(liability.title, style = MaterialTheme.typography.titleMedium); Text("${liability.type} · outstanding ${MaskedPkr(liability.outstandingAmountMinor)} of ${MaskedPkr(liability.originalAmountMinor)}"); TextButton(onClick = { liabilityPaymentTarget = liability }) { Text("Record repayment") } } } }
         item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Investments", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showAdd = true }) { Text("Add") } } }
         if (investments.isEmpty()) item { Text("No investment events yet.") }
-        items(investments, key = { it.id }) { event -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text(event.securityName, style = MaterialTheme.typography.titleMedium); Text("${event.type} · ${formatPkr(event.grossAmountMinor)}") } } }
+        items(investments, key = { it.id }) { event -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text(event.securityName, style = MaterialTheme.typography.titleMedium); Text("${event.type} · ${MaskedPkr(event.grossAmountMinor)}") } } }
         item { Text("Receivables", style = MaterialTheme.typography.titleLarge) }
         if (receivables.isEmpty()) item { Text("No receivables yet.") }
-        items(receivables, key = { it.id }) { value -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(value.title, style = MaterialTheme.typography.titleMedium); Text("${value.counterparty} · outstanding ${formatPkr(value.outstandingAmountMinor)} of ${formatPkr(value.originalAmountMinor)}"); if (value.outstandingAmountMinor > 0) TextButton(onClick = { receivablePaymentTarget = value }) { Text("Record receipt") } } } }
+        items(receivables, key = { it.id }) { value -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(value.title, style = MaterialTheme.typography.titleMedium); Text("${value.counterparty} · outstanding ${MaskedPkr(value.outstandingAmountMinor)} of ${MaskedPkr(value.originalAmountMinor)}"); if (value.outstandingAmountMinor > 0) TextButton(onClick = { receivablePaymentTarget = value }) { Text("Record receipt") } } } }
         item { Text("Goals", style = MaterialTheme.typography.titleLarge) }
         if (goals.isEmpty()) item { Text("No goals yet.") }
-        items(goals, key = { it.id }) { goal -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text(goal.title, style = MaterialTheme.typography.titleMedium); Text("Target ${formatPkr(goal.targetAmountMinor)}") } } }
+        items(goals, key = { it.id }) { goal -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text(goal.title, style = MaterialTheme.typography.titleMedium); Text("Target ${MaskedPkr(goal.targetAmountMinor)}") } } }
     }
     if (showAdd) AddWealthDialog(vm) { showAdd = false }
     valuationTarget?.let { asset -> AmountDialog("Update ${asset.title} valuation", "Current value (PKR)", onDismiss = { valuationTarget = null }) { value -> vm.updateAssetValuation(asset.id, value * 100); valuationTarget = null } }
@@ -413,7 +432,7 @@ internal fun renderDocumentPreview(application: PassportApplication, document: p
 
 @Composable private fun AccountCard(account: AccountEntity, vm: MainViewModel, onEdit: () -> Unit, onArchive: () -> Unit) {
     val movement by vm.accountMovement(account.id).collectAsState(0L)
-    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text(account.name, style = MaterialTheme.typography.titleMedium); Text(account.accountType); Text("Current balance ${formatPkr(account.openingBalanceMinor + movement)}", style = MaterialTheme.typography.titleLarge); Text("Opening balance ${formatPkr(account.openingBalanceMinor)}"); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = onEdit) { Text("Edit") }; TextButton(onClick = onArchive) { Text("Archive") } } } }
+    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text(account.name, style = MaterialTheme.typography.titleMedium); Text(account.accountType); Text("Current balance ${MaskedPkr(account.openingBalanceMinor + movement)}", style = MaterialTheme.typography.titleLarge); Text("Opening balance ${MaskedPkr(account.openingBalanceMinor)}"); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = onEdit) { Text("Edit") }; TextButton(onClick = onArchive) { Text("Archive") } } } }
 }
 
 @Composable private fun AddAccountDialog(vm: MainViewModel, onDismiss: () -> Unit) {
@@ -428,7 +447,8 @@ internal fun renderDocumentPreview(application: PassportApplication, document: p
 
 @Composable private fun AddEventDialog(vm: MainViewModel, accounts: List<AccountEntity>, onDismiss: () -> Unit) {
     var amount by remember { mutableStateOf("") }; var description by remember { mutableStateOf("") }; var category by remember { mutableStateOf("") }; var income by remember { mutableStateOf(true) }; var accountId by remember { mutableStateOf(accounts.firstOrNull()?.id.orEmpty()) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (income) "Record income" else "Record expense") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton({ income = true }) { Text("Income") }; OutlinedButton({ income = false }) { Text("Expense") } }; AccountPicker("Account", accounts, accountId) { accountId = it }; OutlinedTextField(amount, { PkrMoneyInput.groupedInput(it)?.let { value -> amount = value } }, label = { Text("Amount (PKR)") }, singleLine = true, modifier = Modifier.testTag("money-event-amount")); OutlinedTextField(description, { description = it }, label = { Text("What happened?") }, singleLine = true, modifier = Modifier.testTag("money-event-description")); OutlinedTextField(category, { category = it }, label = { Text("Category (optional)") }, singleLine = true, modifier = Modifier.testTag("money-event-category")) } }, confirmButton = { Button(onClick = { vm.addEvent(if (income) FinancialEventType.INCOME else FinancialEventType.EXPENSE, PkrMoneyInput.toMinorUnits(amount, false), accountId, description, category); onDismiss() }, enabled = accountId.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess && description.isNotBlank()) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    var date by remember { mutableStateOf(java.time.LocalDate.now()) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (income) "Record income" else "Record expense") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton({ income = true }) { Text("Income") }; OutlinedButton({ income = false }) { Text("Expense") } }; AccountPicker("Account", accounts, accountId) { accountId = it }; DateField("Date", date, { date = it }, testTag = "money-event-date"); OutlinedTextField(amount, { PkrMoneyInput.groupedInput(it)?.let { value -> amount = value } }, label = { Text("Amount (PKR)") }, singleLine = true, modifier = Modifier.testTag("money-event-amount")); OutlinedTextField(description, { description = it }, label = { Text("What happened?") }, singleLine = true, modifier = Modifier.testTag("money-event-description")); OutlinedTextField(category, { category = it }, label = { Text("Category (optional)") }, singleLine = true, modifier = Modifier.testTag("money-event-category")) } }, confirmButton = { Button(onClick = { vm.addEvent(if (income) FinancialEventType.INCOME else FinancialEventType.EXPENSE, PkrMoneyInput.toMinorUnits(amount, false), accountId, description, category, date); onDismiss() }, enabled = accountId.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess && description.isNotBlank()) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable
@@ -460,11 +480,16 @@ private fun RecurringItemDialog(vm: MainViewModel, application: PassportApplicat
 
 @Composable private fun TransferDialog(vm: MainViewModel, accounts: List<AccountEntity>, onDismiss: () -> Unit) {
     var amount by remember { mutableStateOf("") }; var description by remember { mutableStateOf("") }; var sourceId by remember { mutableStateOf(accounts.getOrNull(0)?.id.orEmpty()) }; var destinationId by remember { mutableStateOf(accounts.getOrNull(1)?.id.orEmpty()) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Transfer between accounts") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { AccountPicker("From account", accounts, sourceId) { sourceId = it }; AccountPicker("To account", accounts, destinationId) { destinationId = it }; OutlinedTextField(amount, { PkrMoneyInput.groupedInput(it)?.let { value -> amount = value } }, label = { Text("Amount (PKR)") }, singleLine = true); OutlinedTextField(description, { description = it }, label = { Text("Reason") }, singleLine = true) } }, confirmButton = { Button(onClick = { vm.transfer(sourceId, destinationId, PkrMoneyInput.toMinorUnits(amount, false), description); onDismiss() }, enabled = sourceId.isNotBlank() && destinationId.isNotBlank() && sourceId != destinationId && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess && description.isNotBlank()) { Text("Transfer") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    var date by remember { mutableStateOf(java.time.LocalDate.now()) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Transfer between accounts") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { AccountPicker("From account", accounts, sourceId) { sourceId = it }; AccountPicker("To account", accounts, destinationId) { destinationId = it }; DateField("Date", date, { date = it }); OutlinedTextField(amount, { PkrMoneyInput.groupedInput(it)?.let { value -> amount = value } }, label = { Text("Amount (PKR)") }, singleLine = true); OutlinedTextField(description, { description = it }, label = { Text("Reason") }, singleLine = true) } }, confirmButton = { Button(onClick = { vm.transfer(sourceId, destinationId, PkrMoneyInput.toMinorUnits(amount, false), description, date); onDismiss() }, enabled = sourceId.isNotBlank() && destinationId.isNotBlank() && sourceId != destinationId && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess && description.isNotBlank()) { Text("Transfer") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable private fun EmptyModuleScreen(label: String, padding: PaddingValues) { Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), Arrangement.spacedBy(12.dp)) { Text(label, style = MaterialTheme.typography.headlineMedium); Text("This workspace is next in the build sequence. Your existing local records are preserved.") } }
 private fun formatPkr(minor: Long): String = PkrMoneyInput.formatMinorUnits(minor)
+
+/** Privacy-aware amount rendering: shows masked placeholders instead of the value while [LocalPrivacyMode] is enabled. */
+@Composable
+private fun MaskedPkr(minor: Long): String = if (LocalPrivacyMode.current) "PKR ••••••" else formatPkr(minor)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

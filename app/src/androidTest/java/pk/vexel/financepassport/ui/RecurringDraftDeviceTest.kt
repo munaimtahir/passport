@@ -2,6 +2,7 @@ package pk.vexel.financepassport.ui
 
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -49,7 +50,14 @@ class RecurringDraftDeviceTest {
         composeRule.onNodeWithText("Next draft reminder:", substring = true).assertIsDisplayed()
     }
 
+    private fun dismissOnboardingIfPresent() {
+        while (composeRule.onAllNodesWithTag("onboarding-next").fetchSemanticsNodes().isNotEmpty()) {
+            composeRule.onNodeWithTag("onboarding-next").performClick()
+        }
+    }
+
     private fun unlockIfNeeded() {
+        dismissOnboardingIfPresent()
         if (composeRule.onAllNodesWithText("Create PIN").fetchSemanticsNodes().isNotEmpty()) {
             val fields = composeRule.onAllNodes(hasSetTextAction())
             fields[0].performTextInput("1234")

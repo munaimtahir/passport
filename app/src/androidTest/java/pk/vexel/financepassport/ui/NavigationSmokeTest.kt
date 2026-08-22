@@ -7,7 +7,9 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.rule.GrantPermissionRule
 import android.Manifest
@@ -34,11 +36,13 @@ class NavigationSmokeTest {
 
     @Test
     fun launchShowsPassportSecurityOrApplicationSurface() {
+        dismissOnboardingIfPresent()
         composeRule.onNodeWithText("Vexel Finance Passport").assertIsDisplayed()
     }
 
     @Test
     fun primaryDestinationsOpenTheirWorkspaces() {
+        dismissOnboardingIfPresent()
         val createPin = composeRule.onAllNodesWithText("Create PIN").fetchSemanticsNodes().isNotEmpty()
         val pinFields = composeRule.onAllNodes(hasSetTextAction())
         if (createPin) {
@@ -54,5 +58,11 @@ class NavigationSmokeTest {
             composeRule.onNodeWithText(heading, useUnmergedTree = true).assertIsDisplayed()
         }
         composeRule.onNodeWithContentDescription("More").assertIsDisplayed()
+    }
+
+    private fun dismissOnboardingIfPresent() {
+        while (composeRule.onAllNodesWithTag("onboarding-next").fetchSemanticsNodes().isNotEmpty()) {
+            composeRule.onNodeWithTag("onboarding-next").performClick()
+        }
     }
 }
