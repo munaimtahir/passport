@@ -57,7 +57,7 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 3 — Canonical home dashboard | DONE (scoped) | `f793fb4` | See detail below |
 | 4 — Versioned tax capture engine | DONE (scoped) | `be260e0` | See detail below |
 | 5 — Annual workspace/reconciliation | DONE (scoped) | `c4ce66f` | See detail below |
-| 6 — Vault/records/evidence lifecycle | DONE (scoped) | (pending — see below) | See detail below |
+| 6 — Vault/records/evidence lifecycle | DONE (scoped) | `863eebd` | See detail below |
 | 7 — Reports/export/backup/calendar | NOT STARTED | — | |
 | 8 — UX/accessibility/security/release hardening | NOT STARTED | — | |
 | 9 — Implementation freeze/clone-ready handoff | NOT STARTED | — | |
