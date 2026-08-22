@@ -73,4 +73,28 @@ class DatabaseMigrationTest {
             }
         }
     }
+
+    @Test
+    fun migrateV8ToV9AddsTaxMappingsTable() {
+        helper.createDatabase("migration-v8", 8).apply {
+            execSQL("INSERT INTO tax_years (id, jurisdictionCode, yearLabel, startDateEpochDay, endDateEpochDay, rulesetVersion, status) VALUES ('PK-2026', 'PK', '2026', 0, 365, 'pk-structural-1', 'OPEN')")
+            execSQL("INSERT INTO tax_items (id, taxYearId, sourceType, sourceId, taxEventType, dateEpochDay, grossAmountMinor, taxWithheldMinor, currency, description, reviewState, evidenceState, exclusionReason, createdAtEpochMillis, updatedAtEpochMillis) VALUES ('item-1', 'PK-2026', 'financial_event', 'event-1', 'EMPLOYMENT_INCOME', 10, 100000, NULL, 'PKR', 'Salary', 'CAPTURED', 'REQUESTED', NULL, 1, 1)")
+            close()
+        }
+
+        helper.runMigrationsAndValidate("migration-v8", 9, true, DatabaseProvider.MIGRATION_8_9).use { database ->
+            database.query("SELECT COUNT(*) FROM tax_items WHERE id = 'item-1'").use { cursor ->
+                cursor.moveToFirst()
+                check(cursor.getInt(0) == 1) { "Pre-existing tax items must survive the migration" }
+            }
+            database.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'tax_mappings'").use { cursor ->
+                check(cursor.moveToFirst())
+            }
+            database.execSQL("INSERT INTO tax_mappings (id, taxItemId, rulesetVersion, taxEventType, sectionCode, categoryCode, source, overrideReason, supersededByMappingId, createdAtEpochMillis) VALUES ('mapping-1', 'item-1', 'pk-structural-1', 'EMPLOYMENT_INCOME', 'INCOME', 'EMPLOYMENT_INCOME', 'SYSTEM_GENERATED', NULL, NULL, 1)")
+            database.query("SELECT COUNT(*) FROM tax_mappings WHERE taxItemId = 'item-1'").use { cursor ->
+                cursor.moveToFirst()
+                check(cursor.getInt(0) == 1) { "A mapping row must be insertable against a pre-existing tax item" }
+            }
+        }
+    }
 }

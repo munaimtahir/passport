@@ -1,0 +1,42 @@
+{
+  "jurisdiction": "PK",
+  "version": "pk-structural-1",
+  "taxYear": "UNSPECIFIED",
+  "rules": [
+    {
+      "eventType": "EMPLOYMENT_INCOME",
+      "sectionCode": "INCOME",
+      "categoryCode": "EMPLOYMENT_INCOME",
+      "evidence": ["salary slip", "annual salary certificate"],
+      "ambiguous": false
+    },
+    {
+      "eventType": "BANK_PROFIT",
+      "sectionCode": "INCOME",
+      "categoryCode": "BANK_PROFIT",
+      "evidence": ["profit certificate", "withholding certificate"],
+      "ambiguous": false
+    },
+    {
+      "eventType": "DIVIDEND",
+      "sectionCode": "INCOME",
+      "categoryCode": "DIVIDEND",
+      "evidence": ["dividend statement"],
+      "ambiguous": false
+    },
+    {
+      "eventType": "INVESTMENT_SALE",
+      "sectionCode": "INVESTMENTS",
+      "categoryCode": "CAPITAL_GAIN_OR_LOSS",
+      "evidence": ["broker statement"],
+      "ambiguous": true
+    },
+    {
+      "eventType": "PERSONAL_EXPENDITURE",
+      "sectionCode": "EXPENDITURE",
+      "categoryCode": "PERSONAL_EXPENDITURE",
+      "evidence": [],
+      "ambiguous": false
+    }
+  ]
+}

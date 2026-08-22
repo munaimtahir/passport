@@ -255,6 +255,24 @@ interface TaxItemDao {
 }
 
 @Dao
+interface TaxMappingDao {
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insert(mapping: TaxMappingEntity)
+
+    @Query("SELECT * FROM tax_mappings WHERE taxItemId = :taxItemId ORDER BY createdAtEpochMillis")
+    suspend fun getForTaxItem(taxItemId: String): List<TaxMappingEntity>
+
+    @Query("SELECT * FROM tax_mappings WHERE taxItemId = :taxItemId ORDER BY createdAtEpochMillis DESC")
+    fun observeForTaxItem(taxItemId: String): Flow<List<TaxMappingEntity>>
+
+    @Query("SELECT * FROM tax_mappings WHERE taxItemId = :taxItemId AND supersededByMappingId IS NULL LIMIT 1")
+    suspend fun getActiveForTaxItem(taxItemId: String): TaxMappingEntity?
+
+    @Query("UPDATE tax_mappings SET supersededByMappingId = :supersededByMappingId WHERE id = :id")
+    suspend fun markSuperseded(id: String, supersededByMappingId: String)
+}
+
+@Dao
 interface TaxDraftDao {
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertDraft(draft: TaxAnnualDraftEntity)

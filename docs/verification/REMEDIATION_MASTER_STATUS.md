@@ -37,8 +37,8 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 5 Wealth | PARTIAL | Phase 2 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Valuation/disposal/repayment/partial-receipt dialogs were already UI-wired (audit predates this); investment holdings summary and non-hardcoded account label added this phase |
 | 6 Home | ~~BROKEN~~ FIXED | Phase 3 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Home now shows canonical `FinancialPosition.netWorthMinor` with an assets/liabilities/liquid-funds/investments/receivables breakdown, correctly labeled; the old movement figure is relabeled "Income vs. expense this period" and never called net worth |
 | 7 Vault/records | PARTIAL | Phase 6 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Crypto/storage solid; dependency-safe delete, search, expiry absent |
-| 8 Tax capture | PARTIAL | Phase 4 | NOT IMPLEMENTED (remapping/taxonomy/drill-down) | Source→tax-item link exists; lineage/remap/evidence workflow incomplete |
-| 9 Rules engine | PARTIAL | Phase 4 | NOT IMPLEMENTED (JSON schema/parser/validator) | Hardcoded Kotlin map only |
+| 8 Tax capture | PARTIAL | Phase 4 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED (mapping lineage); NOT IMPLEMENTED (drill-down UI) | `TaxMappingEntity` now persists SYSTEM_GENERATED/USER_OVERRIDE mapping history with supersession; annual-draft/UI drill-down from a draft line back to its mapping history is still Phase 5 |
+| 9 Rules engine | PARTIAL | Phase 4 | IMPLEMENTED — HOST VERIFIED | Ruleset is now JSON (`taxrules/pk-structural-1.json`), parsed/validated by `TaxRulesetLoader` with typed `RulesetError`s; taxonomy already covered all 24 mega-prompt event types, confirmed not extended; only one ruleset version exists (multi-version history is architecturally supported, not yet exercised) |
 | 10 Annual workspace | PARTIAL | Phase 5 | NOT IMPLEMENTED (drill-down/versioning) | Draft/issue persistence exists; selected-year workspace + lineage absent |
 | 11 Reconciliation | PARTIAL | Phase 5 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Recorded-closing-wealth now sourced from the canonical `FinancialPosition` (was assets-minus-liabilities only, ignoring cash/investments/receivables); UI drill-down still absent (Phase 5) |
 | 12 Reports | PARTIAL | Phase 7 | NOT IMPLEMENTED (preview/full catalog) | Export-only; no in-app preview; raw `/100` formatting |
@@ -55,7 +55,7 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 1 — Onboarding/dates/privacy/UI foundation | DONE (scoped) | `9b8d9ed` | See detail below |
 | 2 — Canonical money/wealth completion | DONE (scoped) | `eb6cbd5` | See detail below |
 | 3 — Canonical home dashboard | DONE (scoped) | `f793fb4` | See detail below |
-| 4 — Versioned tax capture engine | NOT STARTED | — | |
+| 4 — Versioned tax capture engine | DONE (scoped) | (pending — see below) | See detail below |
 | 5 — Annual workspace/reconciliation | NOT STARTED | — | |
 | 6 — Vault/records/evidence lifecycle | NOT STARTED | — | |
 | 7 — Reports/export/backup/calendar | NOT STARTED | — | |
@@ -226,3 +226,85 @@ only consumes it, doesn't recompute it.
 Verification: `./gradlew test lint` PASS (`TaxReadinessTest` caught and had one real fixture bug,
 fixed before this report); `./gradlew assembleDebug assembleDebugAndroidTest` PASS (compiles only;
 no device this session).
+
+## Phase 4 detail
+
+**Corrected before building:** `TaxEventType` already covers all 24 mega-prompt taxonomy values
+(employment/business/professional/rental income, bank profit, dividend, capital gain/loss, tax
+withheld, advance tax, tax payment, asset acquisition/disposal, liability created/repaid, personal
+expenditure, donation, zakat, insurance/pension, foreign income/asset, investment purchase/sale,
+other income, other tax event) — 4C needed no extension, only confirmation.
+
+Landed:
+
+- **4B/4A — JSON ruleset package.** `defaultPakistanStructuralRules()`'s previously-hardcoded list
+  of 5 `TaxRule`s is now data: `app/src/main/resources/taxrules/pk-structural-1.json`, parsed and
+  validated by a new `TaxRulesetLoader.parse(json: String)` (`core/taxrules/TaxRulesetJson.kt`).
+  Malformed JSON, a missing required field, an empty rule list, or a rule naming a tax event type
+  outside `TaxEventType` all throw a typed `RulesetError` subtype — never a silent fallback to the
+  wrong mapping. `BundledTaxRulesets.loadDefault()` reads the packaged JSON via a classpath
+  resource (`javaClass.classLoader.getResourceAsStream(...)`), deliberately **not** `assets/` +
+  `Context.getAssets()` — this keeps the full load-and-parse path host-testable in a plain JVM test
+  (no Robolectric/instrumentation needed) and confirmed working in that JVM test this session.
+  Standard AGP behavior packages `src/main/resources` content into the APK identically to a jar, so
+  this is expected to work on-device unchanged, but that specific expectation — resource actually
+  readable from an installed APK, not just the JVM test classpath — is unverified until Phase 10.
+  `defaultPakistanStructuralRules()` itself is kept (existing `TaxEngineTest.kt` calls it directly)
+  but now just delegates to `BundledTaxRulesets.loadDefault()`, so both paths use identical data.
+- **4F — tax mapping lineage.** New `TaxMappingEntity` (`tax_mappings` table, additive
+  `MIGRATION_8_9`, schema version 8→9) persists mapping history per tax item: ruleset version,
+  classification, `source` (`SYSTEM_GENERATED` vs `USER_OVERRIDE`), override reason, and a
+  `supersededByMappingId` pointer. `FinanceRepository.addEvent`'s income branch and
+  `addManualTaxItem` now insert an initial `SYSTEM_GENERATED` mapping (via the real
+  `StructuralTaxClassifier` against the bundled ruleset) — but only when `TaxItemDao.insertIfAbsent`
+  actually inserted a row, so recomputing against an already-captured source never creates a second
+  mapping history. `reviewTaxItem` (reclassification) now inserts a new mapping row
+  (`USER_OVERRIDE` + the reason) and marks the previously-active mapping's
+  `supersededByMappingId`, instead of only mutating `TaxItemEntity` in place as before — prior
+  mapping rows are never edited or deleted. `TaxItemEntity` itself is still updated in place for its
+  live review-state fields (reviewState/evidenceState/taxEventType), matching existing UI/read
+  patterns; `TaxMappingEntity` is the append-only audit trail sitting alongside it, not a
+  replacement for it.
+- Fixed two schema-version literals in `FinanceRepository.createEncryptedBackup`/
+  `createEncryptedBackupFile` that hardcoded `8` for the backup manifest's `schemaVersion` field —
+  now `9`, matching the bumped `AppDatabase` version (would otherwise have silently mislabeled every
+  backup made after this phase).
+
+Deferred, deliberately:
+
+- **4I duplicate candidate engine** — not touched. The audit-era duplicate-flagging behavior (if
+  any existed before this phase) was not investigated or extended; ran out of priority budget after
+  4B/4F.
+- **4D/4E/4G/4H** (source-capture uniqueness beyond what already existed, the `TaxRelevance` enum,
+  split treatment, the `EvidenceState` enum) — not touched; no concrete broken invariant was found
+  in these areas while implementing 4B/4F, and the mega-prompt said to leave working things alone
+  absent a concrete defect.
+- Only one ruleset version (`pk-structural-1`) exists. The architecture (a `rulesetVersion` string
+  threaded through `TaxYearEntity`/`TaxMappingEntity`/`TaxAnnualDraftEntity`) supports adding a
+  second version as a second JSON resource with no code change, but that was not exercised — there
+  is no test proving two different ruleset versions coexist and are each individually reproducible.
+  This is a real gap versus the mega-prompt's "historical ruleset versions remain immutable"
+  requirement: immutability is architecturally possible but not yet demonstrated with more than one
+  version in existence.
+- `FinanceRepository.addEvent`'s income branch still hardcodes `"EMPLOYMENT_INCOME"` as the tax
+  event type for every income event regardless of category — this predates this phase (audit didn't
+  flag it specifically) and was left alone; it does mean the initial mapping this phase now
+  generates for that path is only ever classified as employment income until a user reclassifies it.
+
+Tests added:
+- JVM (`TaxRulesetLoaderTest`, 7 tests): valid JSON loads; identical JSON parsed twice is `equals`
+  (determinism); malformed JSON, a missing field, an empty rule list, and an unknown taxonomy value
+  each throw the correct `RulesetError` subtype; the bundled default ruleset loads via the classpath
+  resource and is `equals` to what `defaultPakistanStructuralRules()` returns.
+- androidTest (compiled, not run this session): `DatabaseMigrationTest.migrateV8ToV9AddsTaxMappingsTable`
+  (pre-existing `tax_items` row survives the migration; `tax_mappings` table exists and accepts an
+  insert against that pre-existing row) and
+  `AppDatabaseTest.manualTaxItemGetsASystemGeneratedMappingAndReclassificationSupersedesRatherThanReplaces`
+  (a manual tax item gets exactly one initial `SYSTEM_GENERATED` mapping; reclassifying via
+  `reviewTaxItem` does not create a second `TaxItemEntity`, does add a second mapping row, marks the
+  first as superseded by the second while leaving all its other fields unchanged, and the override
+  reason is preserved on the new active mapping).
+
+Verification: `./gradlew test lint` PASS (7/7 new JVM tests green, full suite green);
+`./gradlew assembleDebug` PASS; `./gradlew assembleDebugAndroidTest` PASS (compiles only, not run —
+no device this session). New Room schema version: **9** (`app/schemas/.../9.json` exported).

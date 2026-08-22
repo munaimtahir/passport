@@ -84,9 +84,17 @@ object DatabaseProvider {
         }
     }
 
+    val MIGRATION_8_9: Migration = object : Migration(8, 9) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS tax_mappings (id TEXT NOT NULL PRIMARY KEY, taxItemId TEXT NOT NULL, rulesetVersion TEXT NOT NULL, taxEventType TEXT NOT NULL, sectionCode TEXT NOT NULL, categoryCode TEXT NOT NULL, source TEXT NOT NULL, overrideReason TEXT, supersededByMappingId TEXT, createdAtEpochMillis INTEGER NOT NULL, FOREIGN KEY(taxItemId) REFERENCES tax_items(id) ON DELETE CASCADE)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_tax_mappings_taxItemId ON tax_mappings(taxItemId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_tax_mappings_supersededByMappingId ON tax_mappings(supersededByMappingId)")
+        }
+    }
+
     /** The single migration registry used by production and restore validation. */
     val ALL_MIGRATIONS = arrayOf(
         MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
-        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
     )
 }

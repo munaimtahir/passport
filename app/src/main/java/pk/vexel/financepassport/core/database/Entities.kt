@@ -192,6 +192,32 @@ data class TaxItemEntity(
     val updatedAtEpochMillis: Long,
 )
 
+/**
+ * Persisted tax-mapping lineage (mega-prompt Phase 4F): each row is one classification of a
+ * [TaxItemEntity] at a point in time. Reclassifying never mutates or deletes a prior row — it
+ * inserts a new one and sets the prior row's [supersededByMappingId], so historical treatment
+ * under an earlier ruleset version remains reproducible.
+ */
+@Entity(
+    tableName = "tax_mappings",
+    foreignKeys = [ForeignKey(entity = TaxItemEntity::class, parentColumns = ["id"], childColumns = ["taxItemId"], onDelete = ForeignKey.CASCADE)],
+    indices = [Index("taxItemId"), Index("supersededByMappingId")],
+)
+data class TaxMappingEntity(
+    @PrimaryKey val id: String,
+    val taxItemId: String,
+    val rulesetVersion: String,
+    val taxEventType: String,
+    val sectionCode: String,
+    val categoryCode: String,
+    /** "SYSTEM_GENERATED" for the ruleset's own classification, "USER_OVERRIDE" for a manual reclassification. */
+    val source: String,
+    val overrideReason: String?,
+    /** Null while this is the active/current mapping for its tax item; set to the superseding row's id once replaced. */
+    val supersededByMappingId: String?,
+    val createdAtEpochMillis: Long,
+)
+
 @Entity(tableName = "tax_annual_drafts", indices = [Index("taxYearId")])
 data class TaxAnnualDraftEntity(
     @PrimaryKey val id: String,

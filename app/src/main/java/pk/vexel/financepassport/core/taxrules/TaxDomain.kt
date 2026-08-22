@@ -87,10 +87,9 @@ fun reconcileWealth(input: WealthReconciliationInput): WealthReconciliationResul
     return WealthReconciliationResult(expected, difference, "opening + inflows - expenditure - outflows + adjustments")
 }
 
-fun defaultPakistanStructuralRules(): TaxRuleset = TaxRuleset("PK", "UNSPECIFIED", "pk-structural-1", listOf(
-    TaxRule(TaxEventType.EMPLOYMENT_INCOME, "INCOME", "EMPLOYMENT_INCOME", listOf("salary slip", "annual salary certificate")),
-    TaxRule(TaxEventType.BANK_PROFIT, "INCOME", "BANK_PROFIT", listOf("profit certificate", "withholding certificate")),
-    TaxRule(TaxEventType.DIVIDEND, "INCOME", "DIVIDEND", listOf("dividend statement")),
-    TaxRule(TaxEventType.INVESTMENT_SALE, "INVESTMENTS", "CAPITAL_GAIN_OR_LOSS", listOf("broker statement"), ambiguous = true),
-    TaxRule(TaxEventType.PERSONAL_EXPENDITURE, "EXPENDITURE", "PERSONAL_EXPENDITURE", emptyList()),
-))
+/**
+ * The bundled structural Pakistan ruleset, now data-driven: the content below used to be a
+ * hardcoded Kotlin list; it is loaded from `src/main/resources/taxrules/pk-structural-1.json`
+ * via [BundledTaxRulesets] so a future ruleset version can be added as data, not code.
+ */
+fun defaultPakistanStructuralRules(): TaxRuleset = BundledTaxRulesets.loadDefault()

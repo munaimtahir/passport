@@ -27,6 +27,7 @@ import pk.vexel.financepassport.core.taxrules.TaxEventType
 import pk.vexel.financepassport.core.taxrules.TaxRelevance
 import pk.vexel.financepassport.core.taxrules.TaxYear
 import pk.vexel.financepassport.core.taxrules.defaultPakistanStructuralRules
+import pk.vexel.financepassport.core.taxrules.StructuralTaxClassifier
 import pk.vexel.financepassport.core.taxrules.WealthReconciliationInput
 import pk.vexel.financepassport.core.taxrules.WealthReconciliationResult
 import pk.vexel.financepassport.core.taxrules.reconcileWealth
@@ -248,7 +249,10 @@ class FinanceRepository(private val db: AppDatabase) {
             if (type == FinancialEventType.INCOME) {
                 val yearId = "PK-${date.year}"
                 db.openHelper.writableDatabase.execSQL("INSERT OR IGNORE INTO tax_years (id, jurisdictionCode, yearLabel, startDateEpochDay, endDateEpochDay, rulesetVersion, status) VALUES (?, 'PK', ?, ?, ?, 'pk-structural-1', 'OPEN')", arrayOf<Any>(yearId, date.year.toString(), LocalDate.of(date.year, 1, 1).toEpochDay(), LocalDate.of(date.year, 12, 31).toEpochDay()))
-                db.taxItemDao().insertIfAbsent(TaxItemEntity(UUID.randomUUID().toString(), yearId, "financial_event", eventId, "EMPLOYMENT_INCOME", date.toEpochDay(), amountMinor, null, "PKR", description.trim(), "CAPTURED", "REQUESTED", null, now, now))
+                val taxItemId = UUID.randomUUID().toString()
+                val taxEventType = "EMPLOYMENT_INCOME"
+                val inserted = db.taxItemDao().insertIfAbsent(TaxItemEntity(taxItemId, yearId, "financial_event", eventId, taxEventType, date.toEpochDay(), amountMinor, null, "PKR", description.trim(), "CAPTURED", "REQUESTED", null, now, now))
+                if (inserted != -1L) recordInitialMapping(taxItemId, "financial_event", eventId, date.toEpochDay(), amountMinor, description.trim(), taxEventType, now)
             }
         }
     }
@@ -324,11 +328,29 @@ class FinanceRepository(private val db: AppDatabase) {
         db.taxItemDao().updateReview(id, state, reason, Instant.now().toEpochMilli())
     }
 
+    /**
+     * Reclassifying a tax item never rewrites its mapping history in place (Phase 4F): this
+     * inserts a new [TaxMappingEntity] carrying the override + reason and marks the previously
+     * active mapping (if any) as superseded by it, leaving the prior mapping row intact.
+     */
     suspend fun reviewTaxItem(id: String, taxEventType: String, state: String, reason: String?) {
         require(runCatching { TaxEventType.valueOf(taxEventType) }.isSuccess) { "Unsupported tax event type" }
         require(state in setOf("REVIEWED", "INCLUDED", "EXCLUDED")) { "Invalid reviewed state" }
         require(state != "EXCLUDED" || !reason.isNullOrBlank()) { "An exclusion reason is required" }
-        db.taxItemDao().updateClassification(id, taxEventType, state, reason?.trim(), Instant.now().toEpochMilli())
+        val now = Instant.now().toEpochMilli()
+        db.withTransaction {
+            db.taxItemDao().updateClassification(id, taxEventType, state, reason?.trim(), now)
+            val ruleset = defaultPakistanStructuralRules()
+            val rule = ruleset.rules.firstOrNull { it.eventType.name == taxEventType }
+            val newMapping = TaxMappingEntity(
+                UUID.randomUUID().toString(), id, ruleset.version, taxEventType,
+                rule?.sectionCode ?: "UNMAPPED", rule?.categoryCode ?: "UNMAPPED",
+                "USER_OVERRIDE", reason?.trim(), null, now,
+            )
+            val previousActive = db.taxMappingDao().getActiveForTaxItem(id)
+            db.taxMappingDao().insert(newMapping)
+            previousActive?.let { db.taxMappingDao().markSuperseded(it.id, newMapping.id) }
+        }
     }
 
     suspend fun updateTaxEvidenceState(id: String, evidenceState: String) {
@@ -355,10 +377,34 @@ class FinanceRepository(private val db: AppDatabase) {
         require(amountMinor > 0 && description.isNotBlank()) { "Tax item details are invalid" }
         val yearId = "PK-${date.year}"
         val now = Instant.now().toEpochMilli()
+        val taxItemId = UUID.randomUUID().toString()
+        val sourceId = UUID.randomUUID().toString()
         db.withTransaction {
             db.openHelper.writableDatabase.execSQL("INSERT OR IGNORE INTO tax_years (id, jurisdictionCode, yearLabel, startDateEpochDay, endDateEpochDay, rulesetVersion, status) VALUES (?, 'PK', ?, ?, ?, 'pk-structural-1', 'OPEN')", arrayOf<Any>(yearId, date.year.toString(), LocalDate.of(date.year, 1, 1).toEpochDay(), LocalDate.of(date.year, 12, 31).toEpochDay()))
-            db.taxItemDao().insertIfAbsent(TaxItemEntity(UUID.randomUUID().toString(), yearId, "manual", UUID.randomUUID().toString(), type, date.toEpochDay(), amountMinor, null, "PKR", description.trim(), "CAPTURED", "REQUESTED", null, now, now))
+            val inserted = db.taxItemDao().insertIfAbsent(TaxItemEntity(taxItemId, yearId, "manual", sourceId, type, date.toEpochDay(), amountMinor, null, "PKR", description.trim(), "CAPTURED", "REQUESTED", null, now, now))
+            if (inserted != -1L) recordInitialMapping(taxItemId, "manual", sourceId, date.toEpochDay(), amountMinor, description.trim(), type, now)
         }
+    }
+
+    /**
+     * Records the ruleset-generated mapping for a newly-created tax item (Phase 4F). Only called
+     * when [TaxItemDao.insertIfAbsent] actually inserted a row, so recomputation never creates a
+     * second mapping history for the same source.
+     */
+    private suspend fun recordInitialMapping(taxItemId: String, sourceType: String, sourceId: String, dateEpochDay: Long, amountMinor: Long, description: String, taxEventType: String, createdAt: Long) {
+        val ruleset = defaultPakistanStructuralRules()
+        val candidate = TaxCandidate(sourceType, sourceId, dateEpochDay, Money(MinorUnits(amountMinor), "PKR"), description, runCatching { TaxEventType.valueOf(taxEventType) }.getOrNull(), TaxRelevance.RELEVANT)
+        val classification = StructuralTaxClassifier().classify(candidate, ruleset)
+        val mapping = classification.mapping
+        db.taxMappingDao().insert(
+            TaxMappingEntity(
+                UUID.randomUUID().toString(), taxItemId, ruleset.version,
+                mapping?.eventType?.name ?: taxEventType,
+                mapping?.sectionCode ?: "UNMAPPED",
+                mapping?.categoryCode ?: "UNMAPPED",
+                "SYSTEM_GENERATED", null, null, createdAt,
+            ),
+        )
     }
 
     suspend fun createEncryptedBackup(context: Context, password: CharArray): ByteArray {
@@ -382,7 +428,7 @@ class FinanceRepository(private val db: AppDatabase) {
         }
         val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size
         return try {
-            BackupPackageService().create(snapshotFile.readBytes(), documents, BuildConfig.VERSION_NAME, 8, password, recordCount).payload
+            BackupPackageService().create(snapshotFile.readBytes(), documents, BuildConfig.VERSION_NAME, 9, password, recordCount).payload
         } finally {
             snapshotFile.delete()
         }
@@ -405,7 +451,7 @@ class FinanceRepository(private val db: AppDatabase) {
                 BackupDiskFile("documents/${File(document.localEncryptedPath).name}", File(document.localEncryptedPath))
             }
             val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size
-            BackupPackageService().createStreaming(snapshotFile, documents, BuildConfig.VERSION_NAME, 8, password, recordCount, output)
+            BackupPackageService().createStreaming(snapshotFile, documents, BuildConfig.VERSION_NAME, 9, password, recordCount, output)
             return output
         } catch (failure: Throwable) {
             output.delete()

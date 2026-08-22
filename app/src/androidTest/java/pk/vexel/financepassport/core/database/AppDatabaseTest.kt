@@ -246,4 +246,34 @@ class AppDatabaseTest {
         assertEquals(7_500L, database.financialEventDao().observeAccountMovement(account.id).first())
         assertEquals(3, database.financialEventDao().observeActiveCount().first())
     }
+
+    @Test
+    fun manualTaxItemGetsASystemGeneratedMappingAndReclassificationSupersedesRatherThanReplaces() = runBlocking {
+        val repository = FinanceRepository(database)
+        repository.addManualTaxItem("EMPLOYMENT_INCOME", 100_000, "Freelance salary")
+        val item = database.taxItemDao().getAll().single()
+
+        val initialMappings = database.taxMappingDao().getForTaxItem(item.id)
+        assertEquals(1, initialMappings.size)
+        val initialMapping = initialMappings.single()
+        assertEquals("SYSTEM_GENERATED", initialMapping.source)
+        assertEquals("EMPLOYMENT_INCOME", initialMapping.taxEventType)
+        assertEquals(null, initialMapping.supersededByMappingId)
+
+        repository.reviewTaxItem(item.id, "BANK_PROFIT", "REVIEWED", "Recharacterized as bank profit after reviewing the statement")
+
+        assertEquals("Reclassification must not create a second TaxItemEntity for the same source", 1, database.taxItemDao().getAll().size)
+
+        val mappingsAfterReview = database.taxMappingDao().getForTaxItem(item.id)
+        assertEquals("Reclassification must add a mapping row, not overwrite the original", 2, mappingsAfterReview.size)
+        val supersededOriginal = mappingsAfterReview.single { it.id == initialMapping.id }
+        assertEquals(initialMapping.copy(supersededByMappingId = supersededOriginal.supersededByMappingId), supersededOriginal)
+        assertTrue(supersededOriginal.supersededByMappingId != null)
+
+        val activeMapping = database.taxMappingDao().getActiveForTaxItem(item.id)
+        assertEquals(mappingsAfterReview.first { it.id == supersededOriginal.supersededByMappingId }, activeMapping)
+        assertEquals("USER_OVERRIDE", activeMapping?.source)
+        assertEquals("BANK_PROFIT", activeMapping?.taxEventType)
+        assertEquals("Recharacterized as bank profit after reviewing the statement", activeMapping?.overrideReason)
+    }
 }
