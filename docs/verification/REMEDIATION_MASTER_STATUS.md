@@ -52,7 +52,7 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | Phase | Status | Commit | Notes |
 | --- | --- | --- | --- |
 | 0 — Baseline freeze | DONE | `febea67` | This document created; host baseline re-verified green |
-| 1 — Onboarding/dates/privacy/UI foundation | DONE (scoped) | (pending — see below) | See detail below |
+| 1 — Onboarding/dates/privacy/UI foundation | DONE (scoped) | `9b8d9ed` | See detail below |
 | 2 — Canonical money/wealth completion | NOT STARTED | — | |
 | 3 — Canonical home dashboard | NOT STARTED | — | |
 | 4 — Versioned tax capture engine | NOT STARTED | — | |
