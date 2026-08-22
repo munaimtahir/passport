@@ -110,7 +110,7 @@ fun PassportApp() {
             bottomBar = { NavigationBar { destinations.forEachIndexed { index, destination -> NavigationBarItem(selected == index, { selected = index }, icon = { Icon(destination.icon, destination.label) }, label = { Text(destination.label) }) } } },
         ) { padding ->
             when (selected) {
-                0 -> HomeScreen(vm, application, padding)
+                0 -> HomeScreen(vm, application, padding) { selected = it }
                 1 -> MoneyScreen(vm, application, padding)
                 2 -> WealthScreen(vm, padding)
                 3 -> TaxScreen(vm, padding)
@@ -168,19 +168,70 @@ private fun BackupPasswordDialog(title: String, onDismiss: () -> Unit, onConfirm
 }
 
 @Composable
-private fun HomeScreen(vm: MainViewModel, application: PassportApplication, padding: PaddingValues) {
+private fun HomeScreen(vm: MainViewModel, application: PassportApplication, padding: PaddingValues, onNavigate: (Int) -> Unit) {
     val totals by vm.totals.collectAsState()
     val accounts by vm.accounts.collectAsState()
     val activeEventCount by vm.activeEventCount.collectAsState()
     val recentEvents by vm.recentEvents.collectAsState()
     val calendarItems by vm.calendarItems.collectAsState()
+    val position by vm.financialPosition.collectAsState()
+    val taxItems by vm.taxItems.collectAsState()
+    val readiness = pk.vexel.financepassport.core.model.calculateTaxReadiness(taxItems)
     var showCalendarAdd by rememberSaveable { mutableStateOf(false) }
     var rescheduleTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.CalendarItemEntity?>(null) }
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { Text("Your financial passport", style = MaterialTheme.typography.headlineSmall) }
-        item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp), Arrangement.spacedBy(6.dp)) { Text("Net recorded movement", style = MaterialTheme.typography.labelLarge); Text(MaskedPkr((totals?.first?.minorUnits?.value ?: 0L) - (totals?.second?.minorUnits?.value ?: 0L)), style = MaterialTheme.typography.displaySmall); Text("Based on ${accounts.size} active account(s) and $activeEventCount recorded event(s).") } } }
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp), Arrangement.spacedBy(6.dp)) {
+                    Text("Net worth", style = MaterialTheme.typography.labelLarge)
+                    Text(MaskedPkr(position?.netWorthMinor ?: 0L), style = MaterialTheme.typography.displaySmall)
+                    Text("Everything you own minus everything you owe, from your recorded accounts, assets, investments, receivables and liabilities.", style = MaterialTheme.typography.bodySmall)
+                    if (position != null) {
+                        Column(Modifier.padding(top = 8.dp), Arrangement.spacedBy(2.dp)) {
+                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Liquid funds"); Text(MaskedPkr(position!!.liquidFundsMinor)) }
+                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Investments"); Text(MaskedPkr(position!!.investmentsValueMinor)) }
+                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Assets"); Text(MaskedPkr(position!!.assetsValueMinor)) }
+                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Receivables"); Text(MaskedPkr(position!!.receivablesValueMinor)) }
+                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Liabilities"); Text(MaskedPkr(-position!!.liabilitiesValueMinor)) }
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp), Arrangement.spacedBy(4.dp)) {
+                    Text("Income vs. expense this period", style = MaterialTheme.typography.labelLarge)
+                    Text(MaskedPkr((totals?.first?.minorUnits?.value ?: 0L) - (totals?.second?.minorUnits?.value ?: 0L)), style = MaterialTheme.typography.titleLarge)
+                    Text("Income ${MaskedPkr(position?.monthlyIncomeMinor ?: 0L)} · Expense ${MaskedPkr(position?.monthlyExpenseMinor ?: 0L)} this month, from ${accounts.size} active account(s) and $activeEventCount recorded event(s).", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        item { Text("Quick add", style = MaterialTheme.typography.titleLarge) }
+        item {
+            Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { onNavigate(1) }, modifier = Modifier.weight(1f)) { Text("Income / expense") }
+                OutlinedButton(onClick = { onNavigate(1) }, modifier = Modifier.weight(1f)) { Text("Transfer") }
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { onNavigate(2) }, modifier = Modifier.weight(1f)) { Text("Asset") }
+                OutlinedButton(onClick = { onNavigate(3) }, modifier = Modifier.weight(1f)) { Text("Tax item") }
+                OutlinedButton(onClick = { onNavigate(4) }, modifier = Modifier.weight(1f)) { Text("Document") }
+            }
+        }
         item { Text("Tax-year readiness", style = MaterialTheme.typography.titleLarge) }
-        item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(20.dp), Arrangement.spacedBy(6.dp)) { Text("Capture once, keep evidence linked."); Text("Your local records remain available without internet.") } } }
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp), Arrangement.spacedBy(6.dp)) {
+                    Text("${readiness.evidenceResolvedCount}/${readiness.totalItemCount} tax item(s) have evidence status resolved")
+                    Text("${readiness.unmappedCount} item(s) need classification review · ${readiness.duplicateGroupCount} duplicate candidate group(s)")
+                    Text("These are workflow-completeness signals, not a statement of tax correctness.", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
         item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Upcoming obligations", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showCalendarAdd = true }) { Text("Add") } } }
         if (calendarItems.isEmpty()) item { Text("No reminders scheduled.") }
         items(calendarItems.take(5), key = { it.id }) { reminder -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(reminder.title, style = MaterialTheme.typography.titleMedium); Text(reminder.kind); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = { rescheduleTarget = reminder }) { Text("Reschedule") }; TextButton(onClick = { vm.updateCalendarStatus(application, reminder.id, "COMPLETED") }) { Text("Complete") }; TextButton(onClick = { vm.updateCalendarStatus(application, reminder.id, "CANCELLED") }) { Text("Cancel") } } } } }
@@ -243,8 +294,7 @@ private fun TaxScreen(vm: MainViewModel, padding: PaddingValues) {
     var reviewTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.TaxItemEntity?>(null) }
     var draftLines by remember { mutableStateOf<List<pk.vexel.financepassport.core.database.TaxDraftLineEntity>?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    val evidencePending = items.count { it.evidenceState == "NONE" || it.evidenceState == "REQUESTED" }
-    val unmapped = items.count { it.reviewState == "NEEDS_CLASSIFICATION" || it.taxEventType == "OTHER_TAX_EVENT" }
+    val readiness = pk.vexel.financepassport.core.model.calculateTaxReadiness(items)
     val duplicateCandidates = items.groupBy { Triple(it.dateEpochDay, it.grossAmountMinor, it.currency) }.values.filter { group -> group.size > 1 }
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("Tax & Records", style = MaterialTheme.typography.headlineMedium) }
@@ -255,7 +305,7 @@ private fun TaxScreen(vm: MainViewModel, padding: PaddingValues) {
         if (vm.draftMessage != null) item { Text(vm.draftMessage!!, color = MaterialTheme.colorScheme.primary) }
         item { Button(onClick = { vm.calculateReconciliation() }, modifier = Modifier.fillMaxWidth()) { Text("Reconcile recorded wealth") } }
         if (vm.reconciliationMessage != null) item { Text(vm.reconciliationMessage!!, color = MaterialTheme.colorScheme.primary) }
-        item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text("Annual review readiness", style = MaterialTheme.typography.titleMedium); Text("${items.size - evidencePending}/${items.size} tax item(s) have evidence status resolved"); Text("$unmapped item(s) need classification review · ${duplicateCandidates.size} duplicate candidate group(s)"); Text("These are workflow signals, not a statement of tax correctness.", style = MaterialTheme.typography.bodySmall) } } }
+        item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text("Annual review readiness", style = MaterialTheme.typography.titleMedium); Text("${readiness.evidenceResolvedCount}/${readiness.totalItemCount} tax item(s) have evidence status resolved"); Text("${readiness.unmappedCount} item(s) need classification review · ${duplicateCandidates.size} duplicate candidate group(s)"); Text("These are workflow signals, not a statement of tax correctness.", style = MaterialTheme.typography.bodySmall) } } }
         if (duplicateCandidates.isNotEmpty()) item { Text("Duplicate candidates", style = MaterialTheme.typography.titleLarge) }
         items(duplicateCandidates, key = { group -> group.joinToString("|") { it.id } }) { group -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text("${group.size} items share date, amount and currency", style = MaterialTheme.typography.titleSmall); group.forEach { candidate -> Text("${candidate.description} · ${candidate.sourceType}/${candidate.sourceId}", style = MaterialTheme.typography.bodySmall) }; Text("Review only; no records are merged automatically.", style = MaterialTheme.typography.bodySmall) } } }
         item { Text("Annual draft history", style = MaterialTheme.typography.titleLarge) }

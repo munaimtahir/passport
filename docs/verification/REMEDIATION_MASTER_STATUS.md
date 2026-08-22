@@ -35,7 +35,7 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 3 Security | PARTIAL | Phase 8 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | PIN/biometric/Keystore exist; full lifecycle/device evidence deferred |
 | 4 Money | PARTIAL | Phase 2 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Account institution/notes metadata now captured; canonical liquid-funds calc added (`FinancialPosition`) |
 | 5 Wealth | PARTIAL | Phase 2 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Valuation/disposal/repayment/partial-receipt dialogs were already UI-wired (audit predates this); investment holdings summary and non-hardcoded account label added this phase |
-| 6 Home | **BROKEN** | Phase 3 | NOT IMPLEMENTED (canonical net worth) | "Net recorded movement" mislabeled as net worth; must be replaced |
+| 6 Home | ~~BROKEN~~ FIXED | Phase 3 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Home now shows canonical `FinancialPosition.netWorthMinor` with an assets/liabilities/liquid-funds/investments/receivables breakdown, correctly labeled; the old movement figure is relabeled "Income vs. expense this period" and never called net worth |
 | 7 Vault/records | PARTIAL | Phase 6 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Crypto/storage solid; dependency-safe delete, search, expiry absent |
 | 8 Tax capture | PARTIAL | Phase 4 | NOT IMPLEMENTED (remapping/taxonomy/drill-down) | Source→tax-item link exists; lineage/remap/evidence workflow incomplete |
 | 9 Rules engine | PARTIAL | Phase 4 | NOT IMPLEMENTED (JSON schema/parser/validator) | Hardcoded Kotlin map only |
@@ -54,7 +54,7 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 0 — Baseline freeze | DONE | `febea67` | This document created; host baseline re-verified green |
 | 1 — Onboarding/dates/privacy/UI foundation | DONE (scoped) | `9b8d9ed` | See detail below |
 | 2 — Canonical money/wealth completion | DONE (scoped) | `eb6cbd5` | See detail below |
-| 3 — Canonical home dashboard | NOT STARTED | — | |
+| 3 — Canonical home dashboard | DONE (scoped) | `pending` | See detail below |
 | 4 — Versioned tax capture engine | NOT STARTED | — | |
 | 5 — Annual workspace/reconciliation | NOT STARTED | — | |
 | 6 — Vault/records/evidence lifecycle | NOT STARTED | — | |
@@ -178,3 +178,51 @@ wealth + monthly activity end-to-end).
 
 Verification: `./gradlew test lint` PASS; `./gradlew assembleDebugAndroidTest assembleDebug` PASS
 (compiles only; no device this session).
+
+## Phase 3 detail
+
+Landed:
+
+- **Primary objective — Home net worth fixed.** The audit's #1 flagged ("BROKEN") defect is closed:
+  Home's headline card now shows `MainViewModel.financialPosition.netWorthMinor` (the Phase 2
+  canonical `FinancialPosition`), labeled "Net worth", with a breakdown of liquid funds,
+  investments, assets, receivables and liabilities as separate lines underneath — not a single
+  opaque number. The former income-minus-expense figure is kept as a separate card, relabeled
+  "Income vs. expense this period", and is never called net worth anywhere in the UI.
+  All new amounts go through the existing `MaskedPkr`/`LocalPrivacyMode` path from Phase 1.
+- **Tax-year readiness.** Extracted the tax-readiness counting logic (evidence-pending,
+  unmapped/needs-classification, duplicate-candidate groups) that previously lived inline in
+  `TaxScreen` into a shared, testable domain function `calculateTaxReadiness` in a new
+  `core/model/TaxReadiness.kt`. Home's readiness card and `TaxScreen`'s existing "Annual review
+  readiness" card now both call the same function, so the two surfaces cannot drift. No new tax
+  workflow was added — this phase only replaced ad hoc inline Compose math with a shared,
+  unit-tested calculation, per the mega-prompt's "workflow completeness, not tax correctness" framing.
+- **Quick add.** Home gained a "Quick add" row wired via a new `onNavigate: (Int) -> Unit` callback
+  from `PassportApp` (switches the bottom-nav tab). Buttons for Income/expense and Transfer jump to
+  Money (tab 1, which already has both dialogs); Asset jumps to Wealth (tab 2); Tax item jumps to
+  Tax & Records (tab 3); Document jumps to Vault (tab 4). This is a navigation shortcut, not a
+  duplicated dialog — it reuses each destination's existing add flow rather than re-implementing it
+  inline on Home.
+
+Deferred, deliberately:
+
+- No new Home-specific summary cards for "monthly income"/"monthly expense" as standalone tiles —
+  those numbers are shown inline in the relabeled movement card instead of as separate cards, to
+  avoid a cluttered/duplicated dashboard; can be split out later if the product spec wants dedicated
+  tiles.
+- Quick Add does not deep-link directly into the target dialog (e.g. tapping "Tax item" opens the
+  Tax tab, not the "Add tax item" dialog already open) — out of scope for this pass; would need
+  passing dialog-open intent across screens, a larger change than a tab switch.
+- Tax engine internals, annual draft/reconciliation workspace, and vault/reports/backup were not
+  touched, per this phase's explicit boundaries.
+
+Tests added: `TaxReadinessTest` (JVM, deterministic fixture covering evidence-pending, unmapped,
+and duplicate-group counting — including a regression the first draft of this test caught: five
+items sharing default date/amount values collided into an unintended duplicate group, fixed by
+giving each item a distinct date/amount). No new Compose/device-level test was added since
+`financialPosition`'s correctness is already covered by `FinancialPositionTest` (Phase 2) and Home
+only consumes it, doesn't recompute it.
+
+Verification: `./gradlew test lint` PASS (`TaxReadinessTest` caught and had one real fixture bug,
+fixed before this report); `./gradlew assembleDebug assembleDebugAndroidTest` PASS (compiles only;
+no device this session).
