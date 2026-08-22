@@ -36,7 +36,7 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 4 Money | PARTIAL | Phase 2 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Account institution/notes metadata now captured; canonical liquid-funds calc added (`FinancialPosition`) |
 | 5 Wealth | PARTIAL | Phase 2 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Valuation/disposal/repayment/partial-receipt dialogs were already UI-wired (audit predates this); investment holdings summary and non-hardcoded account label added this phase |
 | 6 Home | ~~BROKEN~~ FIXED | Phase 3 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Home now shows canonical `FinancialPosition.netWorthMinor` with an assets/liabilities/liquid-funds/investments/receivables breakdown, correctly labeled; the old movement figure is relabeled "Income vs. expense this period" and never called net worth |
-| 7 Vault/records | PARTIAL | Phase 6 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Crypto/storage solid; dependency-safe delete, search, expiry absent |
+| 7 Vault/records | PARTIAL | Phase 6 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Fixed a real bug: deleting a document left linked `TaxItemEntity` rows dangling at evidence state ATTACHED; now reverts to REQUESTED. Added dependency-count-aware safe delete, basic metadata search, duplicate-hash-on-import rejection, document/official-record expiry→calendar-reminder wiring, and account-linking (not just tax items) |
 | 8 Tax capture | PARTIAL | Phase 4 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED (mapping lineage); NOT IMPLEMENTED (drill-down UI) | `TaxMappingEntity` now persists SYSTEM_GENERATED/USER_OVERRIDE mapping history with supersession; annual-draft/UI drill-down from a draft line back to its mapping history is still Phase 5 |
 | 9 Rules engine | PARTIAL | Phase 4 | IMPLEMENTED — HOST VERIFIED | Ruleset is now JSON (`taxrules/pk-structural-1.json`), parsed/validated by `TaxRulesetLoader` with typed `RulesetError`s; taxonomy already covered all 24 mega-prompt event types, confirmed not extended; only one ruleset version exists (multi-version history is architecturally supported, not yet exercised) |
 | 10 Annual workspace | PARTIAL | Phase 5 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Draft generation now takes a selected tax year (not just "now"); draft versioning confirmed by test (regeneration increments version, keeps prior version's lines intact); draft-line → source-tax-item drill-down already existed and is unchanged; draft-line → `TaxMappingEntity` lineage walk still not wired (would need a UI drill-down screen, out of this phase's scope) |
@@ -57,13 +57,76 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 3 — Canonical home dashboard | DONE (scoped) | `f793fb4` | See detail below |
 | 4 — Versioned tax capture engine | DONE (scoped) | `be260e0` | See detail below |
 | 5 — Annual workspace/reconciliation | DONE (scoped) | `c4ce66f` | See detail below |
-| 6 — Vault/records/evidence lifecycle | NOT STARTED | — | |
+| 6 — Vault/records/evidence lifecycle | DONE (scoped) | (pending — see below) | See detail below |
 | 7 — Reports/export/backup/calendar | NOT STARTED | — | |
 | 8 — UX/accessibility/security/release hardening | NOT STARTED | — | |
 | 9 — Implementation freeze/clone-ready handoff | NOT STARTED | — | |
 | 10 — Deferred device qualification | NOT STARTED (explicitly deferred) | — | Requires emulator/device environment |
 
 This table is updated at the end of every phase in this remediation run.
+
+## Phase 6 detail
+
+Read the real current state before building (a prior read-only survey this session had already
+confirmed the key facts below; re-verified against source directly): `core/files/DocumentVault.kt`
+already had import/encrypt/decrypt via Keystore AES-GCM and SHA-256 hashing. `DocumentEntity` had
+an `expiryDateEpochDay` column that was always `null` — no UI ever set it, nothing ever read it.
+No schema migration was needed for this phase — every column Phase 6 needed already existed.
+
+**Landed, in priority order:**
+
+- **6E Safe deletion — real bug fix.** `FinanceRepository.deleteDocument()` removed link rows and
+  the file but never reverted a linked `TaxItemEntity.evidenceState` off `ATTACHED`/
+  `VERIFIED_BY_USER`, leaving it dangling once the evidence it pointed at was gone. Fixed: deletion
+  now walks the document's links inside the same transaction and reverts any affected tax item's
+  evidence state to `REQUESTED`. Added `TaxItemDao.getById` (was missing) to support this. The
+  Vault delete dialog now computes and shows the dependency count first (`documentDependencyCount`)
+  and offers Cancel / "Unlink and delete" (worded accordingly) instead of an unconditional "Delete".
+  Did **not** implement a "Replace document" option (keep the same id/links, swap the bytes) —
+  deferred, judged lower value than the correctness fix and the other items below within this
+  phase's time budget.
+- **6G Expiry wiring.** The document-import dialog now collects title, category, and an optional
+  expiry date via Phase 1's `DateField` (previously the dialog had *no* title/category input at
+  all — title was hardcoded to `"Imported evidence"`, category to `"Other"`; this was also a real
+  6A gap, fixed as a side effect). `OfficialRecordDialog` gained the same optional expiry field.
+  Both now call `FinanceRepository.scheduleDocumentExpiryReminder` / the equivalent official-record
+  path, which upserts a `CalendarItemEntity` (kind `DOCUMENT_EXPIRY` / `OFFICIAL_RECORD_EXPIRY`) and
+  calls the existing `ReminderScheduler`, following the exact pattern already used for manual
+  calendar items and recurring drafts (`enqueueUniqueWork(..., ExistingWorkPolicy.REPLACE)` +
+  `calendarDao().upsert` keyed by a deterministic id `document-expiry-$id` /
+  `official-record-expiry-$id`) — re-saving the same expiry cannot duplicate the reminder because
+  both the Room upsert and the WorkManager enqueue are keyed by that same stable id.
+- **6D Evidence linking generality.** `DocumentLinkEntity.entityType` was already schema-generic,
+  but the link dialog only ever offered tax items. It now also lists accounts
+  (`entityType = "account"`), matching the mega-prompt's example of one document (e.g. a bank
+  certificate) linking to more than a tax item. Assets/liabilities were not added — deferred,
+  accounts were judged the highest-value second target.
+- **6F Duplicate detection.** `documents.sha256` already had a unique DB index, but `import()`
+  would have thrown a raw SQLite constraint-violation exception on a duplicate with no useful
+  message. Added an explicit pre-insert check in `DocumentVault.import()` that throws a clear,
+  user-facing error naming the existing document; the Vault import dialog now surfaces that message
+  instead of silently swallowing the failure (previously `runCatching { ... }` with no error path
+  shown to the user at all).
+- **6C Search.** Added a basic title/category substring filter to the Vault document list.
+
+**Deferred (documented here, not faked):** "Replace document" delete option; asset/liability
+evidence-link targets (only tax items + accounts); 6A/6H broader metadata/category breadth beyond
+what was needed for the above; a dedicated instrumentation test for `DocumentVault.import()`'s new
+duplicate-hash guard — it's compile-verified but not independently test-run, because exercising it
+needs a real `ContentResolver`-backed `Uri` (MIME lookup fails against a plain `file://` `Uri` in
+this test environment); the DAO/dependency-count and evidence-state-revert paths it shares with
+deletion *are* covered by `DocumentLifecycleDeviceTest`.
+
+**Tests added** (`app/src/androidTest/java/pk/vexel/financepassport/core/database/DocumentLifecycleDeviceTest.kt`,
+compiled only — no device this session):
+`deletingDocumentRevertsAttachedEvidenceStateInsteadOfLeavingItDangling` (the core regression test
+for the bug fix above), `documentDependencyCountReflectsCurrentLinks`,
+`documentExpiryReminderIsPersistedAsAnOpenCalendarItem`,
+`officialRecordWithoutExpiryDoesNotScheduleAReminder`.
+
+**Verification:** `./gradlew test lint` PASS; `./gradlew assembleDebug` PASS; `./gradlew
+assembleDebugAndroidTest` PASS (compiles only, no device this session). No new Room migration —
+schema stays at version 10.
 
 ## Phase 1 detail
 

@@ -261,6 +261,9 @@ interface TaxItemDao {
     @Query("SELECT * FROM tax_items ORDER BY dateEpochDay DESC")
     fun observeAll(): Flow<List<TaxItemEntity>>
 
+    @Query("SELECT * FROM tax_items WHERE id = :id")
+    suspend fun getById(id: String): TaxItemEntity?
+
     @Query("SELECT * FROM tax_items WHERE taxYearId = :taxYearId ORDER BY dateEpochDay DESC")
     fun observeForYear(taxYearId: String): Flow<List<TaxItemEntity>>
 

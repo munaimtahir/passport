@@ -73,7 +73,7 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     fun addReceivable(title: String, counterparty: String, amountMinor: Long) = write { repository.addReceivable(title, counterparty, amountMinor) }
     fun recordReceivablePayment(id: String, amountMinor: Long) = write { repository.recordReceivablePayment(id, amountMinor) }
     fun addGoal(title: String, targetMinor: Long) = write { repository.addGoal(title, targetMinor) }
-    fun addOfficialRecord(type: String, title: String, identifier: String?) = write { repository.addOfficialRecord(type, title, identifier) }
+    fun addOfficialRecord(context: android.content.Context, type: String, title: String, identifier: String?, issueDate: LocalDate? = null, expiryDate: LocalDate? = null) = write { repository.addOfficialRecord(context, type, title, identifier, issueDate, expiryDate) }
     fun addCalendarItem(context: android.content.Context, title: String, kind: String, delayMinutes: Long) = write { repository.addCalendarItem(context, title, kind, delayMinutes) }
     fun updateCalendarStatus(context: android.content.Context, id: String, status: String) = write { repository.updateCalendarStatus(context, id, status) }
     fun rescheduleCalendarItem(context: android.content.Context, id: String, delayMinutes: Long) = write { repository.rescheduleCalendarItem(context, id, delayMinutes) }
@@ -88,6 +88,8 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     fun addManualTaxItem(type: String, amountMinor: Long, description: String, date: LocalDate = LocalDate.now()) = write { repository.addManualTaxItem(type, amountMinor, description, date) }
     fun linkDocument(documentId: String, entityType: String, entityId: String) = write { repository.linkDocument(documentId, entityType, entityId) }
     fun deleteDocument(documentId: String) = write { repository.deleteDocument(documentId) }
+    suspend fun documentDependencyCount(documentId: String) = repository.documentDependencyCount(documentId)
+    fun scheduleDocumentExpiry(context: android.content.Context, documentId: String, title: String, expiryDateEpochDay: Long) = write { repository.scheduleDocumentExpiryReminder(context, documentId, title, expiryDateEpochDay) }
     fun createBackup(context: android.content.Context, password: CharArray, onComplete: (Result<java.io.File>) -> Unit) = viewModelScope.launch { onComplete(runCatching { repository.createEncryptedBackupFile(context, password) }) }
 }
 

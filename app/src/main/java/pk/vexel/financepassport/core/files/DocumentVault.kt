@@ -14,18 +14,20 @@ import java.util.UUID
 data class ImportedDocument(val metadata: DocumentEntity, val encryptedFile: File)
 
 class DocumentVault(private val context: Context, private val repository: FinanceRepository, private val crypto: KeystoreCryptoService = KeystoreCryptoService()) {
-    suspend fun import(uri: Uri, title: String, category: String): ImportedDocument {
+    suspend fun import(uri: Uri, title: String, category: String, expiryDateEpochDay: Long? = null): ImportedDocument {
         val resolver = context.contentResolver
         val mime = resolver.getType(uri) ?: error("The selected file has no supported MIME type")
         require(mime in SUPPORTED_MIME) { "Supported documents are PDF, JPEG, PNG or WebP" }
         val bytes = resolver.openInputStream(uri)?.use { stream -> stream.readBytes().also { require(it.size <= MAX_BYTES) { "Document is larger than 20 MB" } } } ?: error("Unable to read selected document")
         val digest = MessageDigest.getInstance("SHA-256").digest(bytes).toHex()
+        val existing = repository.database.documentDao().getAll().firstOrNull { it.sha256 == digest }
+        require(existing == null) { "This exact file is already in the vault as \"${existing?.title}\"" }
         val id = UUID.randomUUID().toString()
         val directory = File(context.filesDir, "vault").apply { mkdirs() }
         val file = File(directory, "$id.enc")
         val encrypted = crypto.encrypt(bytes, digest.toByteArray())
         file.outputStream().use { it.write(encrypted.nonce); it.write(encrypted.ciphertext) }
-        val metadata = DocumentEntity(id, title.ifBlank { "Imported document" }, category, id, mime, bytes.size.toLong(), file.absolutePath, digest, null, Instant.now().toEpochMilli())
+        val metadata = DocumentEntity(id, title.ifBlank { "Imported document" }, category, id, mime, bytes.size.toLong(), file.absolutePath, digest, expiryDateEpochDay, Instant.now().toEpochMilli())
         repository.database.documentDao().insert(metadata)
         return ImportedDocument(metadata, file)
     }

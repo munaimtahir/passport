@@ -115,7 +115,7 @@ fun PassportApp() {
                 0 -> HomeScreen(vm, application, padding) { selected = it }
                 1 -> MoneyScreen(vm, application, padding)
                 2 -> WealthScreen(vm, padding)
-                3 -> TaxScreen(vm, padding)
+                3 -> TaxScreen(vm, application, padding)
                 4 -> VaultScreen(vm, application, padding)
                 else -> EmptyModuleScreen(destinations[selected].label, padding)
             }
@@ -285,7 +285,7 @@ private fun MoneyScreen(vm: MainViewModel, application: PassportApplication, pad
 }
 
 @Composable
-private fun TaxScreen(vm: MainViewModel, padding: PaddingValues) {
+private fun TaxScreen(vm: MainViewModel, application: PassportApplication, padding: PaddingValues) {
     val items by vm.taxItems.collectAsState()
     val officialRecords by vm.officialRecords.collectAsState()
     val drafts by vm.drafts.collectAsState()
@@ -337,7 +337,7 @@ private fun TaxScreen(vm: MainViewModel, padding: PaddingValues) {
             Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text(item.description, style = MaterialTheme.typography.titleMedium); Text("${item.taxEventType} · ${item.reviewState}"); Text("Evidence: ${item.evidenceState}"); Text("Source: ${item.sourceType}/${item.sourceId}", style = MaterialTheme.typography.labelSmall); Text(formatPkr(item.grossAmountMinor ?: 0)); if (item.reviewState != "EXCLUDED") TextButton(onClick = { reviewTarget = item }) { Text("Review classification") } } }
         }
     }
-    if (showOfficialRecord) OfficialRecordDialog(vm) { showOfficialRecord = false }
+    if (showOfficialRecord) OfficialRecordDialog(vm, application) { showOfficialRecord = false }
     if (showManualTaxItem) ManualTaxItemDialog(vm) { showManualTaxItem = false }
     reviewTarget?.let { item -> TaxReviewDialog(item, vm) { reviewTarget = null } }
     draftLines?.let { lines ->
@@ -368,11 +368,19 @@ private fun TaxReviewDialog(item: pk.vexel.financepassport.core.database.TaxItem
 }
 
 @Composable
-private fun OfficialRecordDialog(vm: MainViewModel, onDismiss: () -> Unit) {
+private fun OfficialRecordDialog(vm: MainViewModel, application: PassportApplication, onDismiss: () -> Unit) {
     var type by remember { mutableStateOf("CNIC/NICOP") }
     var title by remember { mutableStateOf("") }
     var identifier by remember { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add official record") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedTextField(type, { type = it }, label = { Text("Record type") }, singleLine = true); OutlinedTextField(title, { title = it }, label = { Text("Title") }, singleLine = true); OutlinedTextField(identifier, { identifier = it }, label = { Text("Sensitive identifier (optional)") }, singleLine = true) } }, confirmButton = { Button(onClick = { vm.addOfficialRecord(type, title, identifier); onDismiss() }, enabled = title.isNotBlank()) { Text("Save encrypted") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    var hasExpiry by remember { mutableStateOf(false) }
+    var expiry by remember { mutableStateOf(java.time.LocalDate.now().plusYears(1)) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add official record") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(type, { type = it }, label = { Text("Record type") }, singleLine = true)
+        OutlinedTextField(title, { title = it }, label = { Text("Title") }, singleLine = true)
+        OutlinedTextField(identifier, { identifier = it }, label = { Text("Sensitive identifier (optional)") }, singleLine = true)
+        OutlinedButton(onClick = { hasExpiry = !hasExpiry }) { Text(if (hasExpiry) "Remove expiry date" else "Set expiry date") }
+        if (hasExpiry) DateField("Expiry date", expiry, { expiry = it })
+    } }, confirmButton = { Button(onClick = { vm.addOfficialRecord(application, type, title, identifier, expiryDate = expiry.takeIf { hasExpiry }); onDismiss() }, enabled = title.isNotBlank()) { Text("Save encrypted") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable private fun ManualTaxItemDialog(vm: MainViewModel, onDismiss: () -> Unit) {
@@ -454,30 +462,68 @@ private fun AmountDialog(title: String, label: String, onDismiss: () -> Unit, on
 private fun VaultScreen(vm: MainViewModel, application: PassportApplication, padding: PaddingValues) {
     val documents by vm.documents.collectAsState()
     val taxItems by vm.taxItems.collectAsState()
+    val accounts by vm.accounts.collectAsState()
     var pendingUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var linkTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.DocumentEntity?>(null) }
     var deleteTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.DocumentEntity?>(null) }
+    var deleteDependencyCount by remember { mutableStateOf(0) }
     var previewTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.DocumentEntity?>(null) }
     var previewBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
     var previewError by remember { mutableStateOf<String?>(null) }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { pendingUri = it }
+    var importError by remember { mutableStateOf<String?>(null) }
+    var searchQuery by remember { mutableStateOf("") }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { pendingUri = it; importError = null }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val visibleDocuments = documents.filter { searchQuery.isBlank() || it.title.contains(searchQuery, ignoreCase = true) || it.category.contains(searchQuery, ignoreCase = true) }
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Vault", style = MaterialTheme.typography.headlineMedium); IconButton(onClick = { launcher.launch(arrayOf("application/pdf", "image/jpeg", "image/png", "image/webp")) }) { Icon(Icons.Default.Add, "Import document") } } }
         item { Text("Evidence stays attached to structured records.") }
+        item { OutlinedTextField(searchQuery, { searchQuery = it }, label = { Text("Search by title or category") }, singleLine = true, modifier = Modifier.fillMaxWidth()) }
+        if (importError != null) item { Text(importError!!, color = MaterialTheme.colorScheme.error) }
         if (documents.isEmpty()) item { Text("No documents yet. Import a PDF or image to keep local evidence.") }
-        items(documents, key = { it.id }) { document -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text(document.title, style = MaterialTheme.typography.titleMedium); Text("${document.category} · ${document.mimeType}"); Text("SHA-256 ${document.sha256.take(12)}…"); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = { previewTarget = document; previewBitmap = null; previewError = null; scope.launch { runCatching { withContext(Dispatchers.IO) { renderDocumentPreview(application, document) }.asImageBitmap() }.onSuccess { previewBitmap = it }.onFailure { previewError = it.message ?: "Preview failed" } } }) { Text("Preview") }; if (taxItems.isNotEmpty()) TextButton(onClick = { linkTarget = document }) { Text("Link to tax item") }; TextButton(onClick = { deleteTarget = document }) { Text("Delete") } } } } }
+        else if (visibleDocuments.isEmpty()) item { Text("No documents match \"$searchQuery\".") }
+        items(visibleDocuments, key = { it.id }) { document -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text(document.title, style = MaterialTheme.typography.titleMedium); Text("${document.category} · ${document.mimeType}"); Text("SHA-256 ${document.sha256.take(12)}…"); document.expiryDateEpochDay?.let { Text("Expires ${java.time.LocalDate.ofEpochDay(it)}", style = MaterialTheme.typography.bodySmall) }; Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = { previewTarget = document; previewBitmap = null; previewError = null; scope.launch { runCatching { withContext(Dispatchers.IO) { renderDocumentPreview(application, document) }.asImageBitmap() }.onSuccess { previewBitmap = it }.onFailure { previewError = it.message ?: "Preview failed" } } }) { Text("Preview") }; if (taxItems.isNotEmpty() || accounts.isNotEmpty()) TextButton(onClick = { linkTarget = document }) { Text("Link") }; TextButton(onClick = { scope.launch { deleteDependencyCount = vm.documentDependencyCount(document.id); deleteTarget = document } }) { Text("Delete") } } } } }
     }
     pendingUri?.let { uri ->
-        AlertDialog(onDismissRequest = { pendingUri = null }, title = { Text("Save document") }, text = { Text("The selected file will be encrypted into app-private storage.") }, confirmButton = { Button(onClick = { scope.launch { runCatching { DocumentVault(application, application.repository).import(uri, "Imported evidence", "Other") }; pendingUri = null } }) { Text("Import") } }, dismissButton = { TextButton(onClick = { pendingUri = null }) { Text("Cancel") } })
+        ImportDocumentDialog(
+            onDismiss = { pendingUri = null },
+            onImport = { title, category, expiry ->
+                scope.launch {
+                    runCatching { DocumentVault(application, application.repository).import(uri, title, category, expiry?.toEpochDay()) }
+                        .onSuccess { imported -> expiry?.let { vm.scheduleDocumentExpiry(application, imported.metadata.id, imported.metadata.title, it.toEpochDay()) }; pendingUri = null }
+                        .onFailure { importError = it.message ?: "Import failed" }
+                }
+            },
+        )
     }
-    linkTarget?.let { document -> LinkDocumentDialog(document, taxItems, vm) { linkTarget = null } }
+    linkTarget?.let { document -> LinkDocumentDialog(document, taxItems, accounts, vm) { linkTarget = null } }
     deleteTarget?.let { document ->
-        AlertDialog(onDismissRequest = { deleteTarget = null }, title = { Text("Delete encrypted document?") }, text = { Text("This permanently removes the encrypted file, metadata, and all evidence links for ${document.title}.") }, confirmButton = { Button(onClick = { vm.deleteDocument(document.id); deleteTarget = null }) { Text("Delete") } }, dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancel") } })
+        AlertDialog(
+            onDismissRequest = { deleteTarget = null },
+            title = { Text("Delete encrypted document?") },
+            text = { Text(if (deleteDependencyCount > 0) "This document is evidence for $deleteDependencyCount record(s). Deleting it unlinks those records and reverts any evidence they relied on to \"requested\". This cannot be undone." else "This permanently removes the encrypted file and metadata for ${document.title}. It has no linked records.") },
+            confirmButton = { Button(onClick = { vm.deleteDocument(document.id); deleteTarget = null }) { Text(if (deleteDependencyCount > 0) "Unlink and delete" else "Delete") } },
+            dismissButton = { TextButton(onClick = { deleteTarget = null }) { Text("Cancel") } },
+        )
     }
     previewTarget?.let { document ->
         AlertDialog(onDismissRequest = { previewTarget = null; previewBitmap = null }, title = { Text(document.title) }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { previewBitmap?.let { Image(it, contentDescription = "Preview of ${document.title}", modifier = Modifier.fillMaxWidth()) } ?: Text(previewError ?: "Decrypting preview…") } }, confirmButton = { TextButton(onClick = { previewTarget = null; previewBitmap = null }) { Text("Close") } })
     }
+}
+
+@Composable
+private fun ImportDocumentDialog(onDismiss: () -> Unit, onImport: (String, String, java.time.LocalDate?) -> Unit) {
+    var title by remember { mutableStateOf("") }
+    var category by remember { mutableStateOf("Other") }
+    var hasExpiry by remember { mutableStateOf(false) }
+    var expiry by remember { mutableStateOf(java.time.LocalDate.now().plusYears(1)) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Save document") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("The selected file will be encrypted into app-private storage.", style = MaterialTheme.typography.bodySmall)
+        OutlinedTextField(title, { title = it }, label = { Text("Title") }, singleLine = true)
+        OutlinedTextField(category, { category = it }, label = { Text("Category") }, singleLine = true)
+        OutlinedButton(onClick = { hasExpiry = !hasExpiry }) { Text(if (hasExpiry) "Remove expiry date" else "Set expiry date") }
+        if (hasExpiry) DateField("Expiry date", expiry, { expiry = it })
+    } }, confirmButton = { Button(onClick = { onImport(title.ifBlank { "Imported document" }, category.ifBlank { "Other" }, expiry.takeIf { hasExpiry }) }) { Text("Import") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 internal fun renderDocumentPreview(application: PassportApplication, document: pk.vexel.financepassport.core.database.DocumentEntity): Bitmap {
@@ -502,8 +548,12 @@ internal fun renderDocumentPreview(application: PassportApplication, document: p
     }
 }
 
-@Composable private fun LinkDocumentDialog(document: pk.vexel.financepassport.core.database.DocumentEntity, taxItems: List<pk.vexel.financepassport.core.database.TaxItemEntity>, vm: MainViewModel, onDismiss: () -> Unit) {
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Link ${document.title}") }, text = { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) { Text("Choose a tax item. The same document can be linked again to another record.", style = MaterialTheme.typography.bodySmall); taxItems.take(8).forEach { item -> TextButton(onClick = { vm.linkDocument(document.id, "tax_item", item.id); onDismiss() }, modifier = Modifier.fillMaxWidth()) { Text(item.description, maxLines = 1) } } } }, confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } })
+@Composable private fun LinkDocumentDialog(document: pk.vexel.financepassport.core.database.DocumentEntity, taxItems: List<pk.vexel.financepassport.core.database.TaxItemEntity>, accounts: List<AccountEntity>, vm: MainViewModel, onDismiss: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Link ${document.title}") }, text = { Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("The same document can be linked again to another record.", style = MaterialTheme.typography.bodySmall)
+        if (taxItems.isNotEmpty()) { Text("Tax items", style = MaterialTheme.typography.labelLarge); taxItems.take(8).forEach { item -> TextButton(onClick = { vm.linkDocument(document.id, "tax_item", item.id); onDismiss() }, modifier = Modifier.fillMaxWidth()) { Text(item.description, maxLines = 1) } } }
+        if (accounts.isNotEmpty()) { Text("Accounts", style = MaterialTheme.typography.labelLarge); accounts.take(8).forEach { account -> TextButton(onClick = { vm.linkDocument(document.id, "account", account.id); onDismiss() }, modifier = Modifier.fillMaxWidth()) { Text(account.name, maxLines = 1) } } }
+    } }, confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } })
 }
 
 @Composable private fun AccountCard(account: AccountEntity, vm: MainViewModel, onEdit: () -> Unit, onArchive: () -> Unit) {

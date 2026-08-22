@@ -197,11 +197,13 @@ class FinanceRepository(private val db: AppDatabase) {
         db.budgetDao().upsert(BudgetEntity(id, category.trim(), monthlyLimitMinor, currency, "ACTIVE", existing?.createdAtEpochMillis ?: now, now))
     }
 
-    suspend fun addOfficialRecord(type: String, title: String, identifier: String?) {
+    suspend fun addOfficialRecord(context: Context, type: String, title: String, identifier: String?, issueDate: LocalDate? = null, expiryDate: LocalDate? = null) {
         val normalized = identifier?.trim()?.takeIf { it.isNotEmpty() }
         val encrypted = normalized?.let { KeystoreCryptoService().encrypt(it.toByteArray(), title.toByteArray()).let { value -> value.nonce + value.ciphertext } }
         val masked = normalized?.let { if (it.length <= 4) "••••" else "••••${it.takeLast(4)}" }
-        db.officialRecordDao().upsert(OfficialRecordEntity(UUID.randomUUID().toString(), type, title.trim(), masked, encrypted, null, null, null, "ACTIVE"))
+        val id = UUID.randomUUID().toString()
+        db.officialRecordDao().upsert(OfficialRecordEntity(id, type, title.trim(), masked, encrypted, issueDate?.toEpochDay(), expiryDate?.toEpochDay(), null, "ACTIVE"))
+        if (expiryDate != null) scheduleOrCancelExpiryReminder(context, "official-record-expiry-$id", "OFFICIAL_RECORD_EXPIRY", title.trim(), id, expiryDate.toEpochDay())
     }
 
     suspend fun addCalendarItem(context: Context, title: String, kind: String, delayMinutes: Long) {
@@ -365,13 +367,41 @@ class FinanceRepository(private val db: AppDatabase) {
         if (entityType == "tax_item") db.taxItemDao().updateEvidenceState(entityId, "ATTACHED", Instant.now().toEpochMilli())
     }
 
+    /** Number of records (tax items, accounts, etc.) currently linked to this document, for a safe-delete warning. */
+    suspend fun documentDependencyCount(documentId: String): Int = db.documentLinkDao().getForDocument(documentId).size
+
     suspend fun deleteDocument(documentId: String) {
         val document = db.documentDao().getAll().firstOrNull { it.id == documentId } ?: error("Document not found")
         db.withTransaction {
+            val links = db.documentLinkDao().getForDocument(documentId)
+            val now = Instant.now().toEpochMilli()
+            links.filter { it.entityType == "tax_item" }.forEach { link ->
+                val item = db.taxItemDao().getById(link.entityId)
+                if (item != null && item.evidenceState in setOf("ATTACHED", "VERIFIED_BY_USER")) {
+                    db.taxItemDao().updateEvidenceState(link.entityId, "REQUESTED", now)
+                }
+            }
             db.documentLinkDao().deleteForDocument(documentId)
             db.documentDao().delete(documentId)
         }
         File(document.localEncryptedPath).delete()
+    }
+
+    /** Schedules (or, if [expiryDateEpochDay] is null, cancels) a persisted calendar reminder tied to an expiring document/official record. */
+    private suspend fun scheduleOrCancelExpiryReminder(context: Context, calendarId: String, kind: String, title: String, linkedEntityId: String?, expiryDateEpochDay: Long?) {
+        if (expiryDateEpochDay != null) {
+            val dueAt = LocalDate.ofEpochDay(expiryDateEpochDay).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            db.calendarDao().upsert(CalendarItemEntity(calendarId, "$title is expiring", kind, dueAt, linkedEntityId, "OPEN", 0))
+            ReminderScheduler(context).schedule(calendarId, dueAt, 0, "$title is expiring", "Review and renew this record before it expires.")
+        } else {
+            db.calendarDao().updateStatus(calendarId, "CANCELLED")
+            ReminderScheduler(context).cancel(calendarId)
+        }
+    }
+
+    /** Wires a just-imported document's expiry date to a due-date reminder; call once, right after a successful import that carried an expiry date. */
+    suspend fun scheduleDocumentExpiryReminder(context: Context, documentId: String, title: String, expiryDateEpochDay: Long) {
+        scheduleOrCancelExpiryReminder(context, "document-expiry-$documentId", "DOCUMENT_EXPIRY", title, documentId, expiryDateEpochDay)
     }
 
     suspend fun addManualTaxItem(type: String, amountMinor: Long, description: String, date: LocalDate = LocalDate.now()) {
