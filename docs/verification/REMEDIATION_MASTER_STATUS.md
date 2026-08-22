@@ -39,8 +39,8 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 7 Vault/records | PARTIAL | Phase 6 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Crypto/storage solid; dependency-safe delete, search, expiry absent |
 | 8 Tax capture | PARTIAL | Phase 4 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED (mapping lineage); NOT IMPLEMENTED (drill-down UI) | `TaxMappingEntity` now persists SYSTEM_GENERATED/USER_OVERRIDE mapping history with supersession; annual-draft/UI drill-down from a draft line back to its mapping history is still Phase 5 |
 | 9 Rules engine | PARTIAL | Phase 4 | IMPLEMENTED — HOST VERIFIED | Ruleset is now JSON (`taxrules/pk-structural-1.json`), parsed/validated by `TaxRulesetLoader` with typed `RulesetError`s; taxonomy already covered all 24 mega-prompt event types, confirmed not extended; only one ruleset version exists (multi-version history is architecturally supported, not yet exercised) |
-| 10 Annual workspace | PARTIAL | Phase 5 | NOT IMPLEMENTED (drill-down/versioning) | Draft/issue persistence exists; selected-year workspace + lineage absent |
-| 11 Reconciliation | PARTIAL | Phase 5 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Recorded-closing-wealth now sourced from the canonical `FinancialPosition` (was assets-minus-liabilities only, ignoring cash/investments/receivables); UI drill-down still absent (Phase 5) |
+| 10 Annual workspace | PARTIAL | Phase 5 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Draft generation now takes a selected tax year (not just "now"); draft versioning confirmed by test (regeneration increments version, keeps prior version's lines intact); draft-line → source-tax-item drill-down already existed and is unchanged; draft-line → `TaxMappingEntity` lineage walk still not wired (would need a UI drill-down screen, out of this phase's scope) |
+| 11 Reconciliation | PARTIAL | Phase 5 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Fixed a real bug: opening wealth was hardcoded to zero and reconciliation summed *all* financial events ever, not just the tax year's. Now requires a persisted `WealthSnapshotEntity` (Phase 5D, new) opening snapshot and scopes income/expenditure to the tax year's date range; UI drill-down into individual contributing records still absent |
 | 12 Reports | PARTIAL | Phase 7 | NOT IMPLEMENTED (preview/full catalog) | Export-only; no in-app preview; raw `/100` formatting |
 | 13 Backup/restore | PARTIAL | Phase 7 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Crypto/staging done; equivalence proof needs device (Phase 10D) |
 | 14 Calendar | PARTIAL | Phase 7 | NOT IMPLEMENTED (expiry/due-date wiring) | Generic reminders exist; document/receivable/tax-review linkage absent |
@@ -56,7 +56,7 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 2 — Canonical money/wealth completion | DONE (scoped) | `eb6cbd5` | See detail below |
 | 3 — Canonical home dashboard | DONE (scoped) | `f793fb4` | See detail below |
 | 4 — Versioned tax capture engine | DONE (scoped) | `be260e0` | See detail below |
-| 5 — Annual workspace/reconciliation | NOT STARTED | — | |
+| 5 — Annual workspace/reconciliation | DONE (scoped) | (pending — see below) | See detail below |
 | 6 — Vault/records/evidence lifecycle | NOT STARTED | — | |
 | 7 — Reports/export/backup/calendar | NOT STARTED | — | |
 | 8 — UX/accessibility/security/release hardening | NOT STARTED | — | |
@@ -308,3 +308,73 @@ Tests added:
 Verification: `./gradlew test lint` PASS (7/7 new JVM tests green, full suite green);
 `./gradlew assembleDebug` PASS; `./gradlew assembleDebugAndroidTest` PASS (compiles only, not run —
 no device this session). New Room schema version: **9** (`app/schemas/.../9.json` exported).
+
+## Phase 5 detail
+
+**Read before writing:** confirmed against real source (not the stale audit) that
+`TaxAnnualDraftEntity` already had a `draftVersion: Int` column and `TaxDraftDao.maxVersion` +
+`prepareAnnualDraft` already incremented it on regeneration — draft versioning existed already and
+needed no new migration, only a test proving it actually behaves that way (added; see below).
+`TaxDraftLineEntity.sourceIdsJson` already gave line→source-tax-item drill-down. The real, concrete
+gaps were: (1) `prepareAnnualDraft`/reconciliation only ever operated on the current device-clock
+year, with no way to select a past tax year; (2) `calculateCurrentReconciliation` hardcoded opening
+wealth to `Money(MinorUnits(0))` — a direct violation of the mega-prompt's explicit "do not hardcode
+opening wealth to zero" rule — and summed *every* financial event ever recorded as this year's
+inflows/expenditure, not just events dated within the tax year.
+
+Landed:
+
+- **New `WealthSnapshotEntity`** (`wealth_snapshots` table, additive `MIGRATION_9_10`, schema
+  version 9→10; also bumped the two hardcoded backup-manifest `schemaVersion` literals in
+  `FinanceRepository` from `9` to `10`, the same class of bug Phase 4 fixed for the 8→9 bump).
+  Records an OPENING or CLOSING wealth position for a tax year, captured from the canonical
+  `FinancialPosition` at the moment `FinanceRepository.recordWealthSnapshot(year, kind, date)` is
+  called. Re-recording the same kind replaces the prior row (`OnConflictStrategy.REPLACE`) — this
+  is treated as a correctable working estimate, not an immutable source fact; a `WealthReconciliationEntity`
+  already generated from an earlier snapshot keeps its own recorded figures regardless of later
+  snapshot edits, so historical reconciliations remain reproducible.
+- **`calculateReconciliation(taxYearId)` replaces `calculateCurrentReconciliation()`.** Now
+  requires a persisted OPENING snapshot for the year — throws a clear error ("Record an opening
+  wealth snapshot for PK-2026 before reconciling") rather than silently defaulting to zero — and
+  scopes income/expenditure summation to `FinancialEventEntity` rows whose `dateEpochDay` falls
+  inside the tax year's `startDateEpochDay..endDateEpochDay`. Recorded closing wealth prefers a
+  persisted CLOSING snapshot; falls back to the live canonical `FinancialPosition` only for a year
+  with no closing snapshot yet (i.e. the current, still-open year) — documented as such in code, not
+  hidden.
+- **`prepareAnnualDraft(year: Int = LocalDate.now().year)`** — added the year parameter (existing
+  no-arg call site keeps working via the default); a shared private `ensureTaxYearExists(year)`
+  helper (extracted from the pre-existing inline `INSERT OR IGNORE` SQL) is now used by both draft
+  generation and snapshot recording, so a snapshot can be recorded for a year before any tax item or
+  draft exists for it, without needing a separate "create this tax year" step.
+- **UI (Tax screen):** a year-selector stepper (`MainViewModel.selectedTaxYear`/`selectTaxYear`,
+  bounded so it cannot select a future year) now drives "Prepare draft" and "Reconcile recorded
+  wealth"; two new buttons record an opening/closing snapshot for the selected year. Existing
+  draft-history, issue-list, and reconciliation-history cards were left as-is (already functional).
+
+**Deliberately deferred (not faked):**
+- **5C tax issue center** — `TaxIssueEntity` rows are still only the ones `AnnualDraftGenerator`'s
+  classifier already produces (AMBIGUOUS/EVIDENCE/UNMAPPED/NO_RULE); no additional preflight-only
+  issue types (e.g. "missing opening snapshot", "duplicate candidate") were wired into persisted
+  `TaxIssueEntity` rows — the missing-opening-snapshot case is instead a thrown error at
+  reconciliation time, which is a narrower behavior than a persisted, browsable issue.
+- **5F annual close lifecycle (OPEN → REVIEW → FILED)** — not implemented; `TaxYearEntity.status`
+  still only ever gets set to `"OPEN"`.
+- **Draft-line → `TaxMappingEntity` lineage walk** — a draft line still only stores source tax-item
+  ids (`sourceIdsJson`), not mapping ids; there is no UI screen walking from a draft line to the
+  specific `TaxMappingEntity` row(s) that produced it. The data needed to build that (mapping table,
+  `getForTaxItem`) already exists from Phase 4; only the join/UI was left undone here.
+- Multi-tax-year reconciliation UI polish (e.g. showing all recorded snapshots for the selected
+  year inline) was not built — snapshot recording has no visible confirmation beyond the existing
+  `reconciliationMessage` toast-style text.
+
+**Tests added** (`AppDatabaseTest.kt`, androidTest, compiled only — no device this session):
+`regeneratingAnnualDraftCreatesNewVersionWithoutDeletingPriorLines` (draft v1's lines are byte-for-byte
+unchanged after generating v2 for the same year); `reconciliationRequiresAnOpeningSnapshotBeforeRunning`
+(throws rather than silently using zero); `reconciliationUsesRecordedOpeningSnapshotAndScopesEventsToTheTaxYear`
+(a prior-year event is excluded from the current year's expected-closing calculation even though it
+is in the same account's history). `DatabaseMigrationTest.migrateV9ToV10AddsWealthSnapshotsTable`
+mirrors the existing 8→9 migration test pattern.
+
+Verification: `./gradlew test lint` PASS; `./gradlew assembleDebug` PASS; `./gradlew
+assembleDebugAndroidTest` PASS (compiles only, not run — no device this session). New Room schema
+version: **10**.

@@ -39,6 +39,13 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     val taxIssues = repository.taxIssues.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val reconciliations = repository.reconciliations.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val recurringItems = repository.recurringItems.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val taxYears = repository.taxYears.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    /** The tax year the Tax workspace is currently viewing/acting on (Phase 5A: a selected-year
+     * workspace, not just whatever the device clock says "now" is). */
+    var selectedTaxYear by mutableStateOf(LocalDate.now().year)
+        private set
+    fun selectTaxYear(year: Int) { selectedTaxYear = year }
+    val selectedTaxYearId: String get() = "PK-$selectedTaxYear"
     val financialPosition = repository.financialPosition.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null as pk.vexel.financepassport.core.model.FinancialPosition?)
     var draftMessage by mutableStateOf<String?>(null)
     var reconciliationMessage by mutableStateOf<String?>(null)
@@ -71,9 +78,10 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     fun updateCalendarStatus(context: android.content.Context, id: String, status: String) = write { repository.updateCalendarStatus(context, id, status) }
     fun rescheduleCalendarItem(context: android.content.Context, id: String, delayMinutes: Long) = write { repository.rescheduleCalendarItem(context, id, delayMinutes) }
     fun deleteAllData(context: android.content.Context) = write { repository.deleteAllData(context) }
-    fun prepareAnnualDraft() = viewModelScope.launch { draftMessage = runCatching { "Draft v${repository.prepareAnnualDraft().draftVersion} prepared" }.getOrElse { "Draft failed: ${it.message}" } }
+    fun prepareAnnualDraft() = viewModelScope.launch { draftMessage = runCatching { "Draft v${repository.prepareAnnualDraft(selectedTaxYear).draftVersion} prepared for $selectedTaxYearId" }.getOrElse { "Draft failed: ${it.message}" } }
     suspend fun getDraftLines(draftId: String) = repository.getDraftLines(draftId)
-    fun calculateReconciliation() = viewModelScope.launch { reconciliationMessage = runCatching { "Unexplained difference: PKR ${repository.calculateCurrentReconciliation().unexplainedDifference.minorUnits.value / 100}" }.getOrElse { "Reconciliation failed: ${it.message}" } }
+    fun recordWealthSnapshot(kind: String) = viewModelScope.launch { reconciliationMessage = runCatching { repository.recordWealthSnapshot(selectedTaxYear, kind); "${kind.lowercase().replaceFirstChar { it.uppercase() }} snapshot recorded for $selectedTaxYearId" }.getOrElse { "Snapshot failed: ${it.message}" } }
+    fun calculateReconciliation() = viewModelScope.launch { reconciliationMessage = runCatching { "Unexplained difference: PKR ${repository.calculateReconciliation(selectedTaxYearId).unexplainedDifference.minorUnits.value / 100}" }.getOrElse { "Reconciliation failed: ${it.message}" } }
     fun updateTaxReview(id: String, state: String, reason: String? = null) = write { repository.updateTaxReview(id, state, reason) }
     fun reviewTaxItem(id: String, taxEventType: String, state: String, reason: String?) = write { repository.reviewTaxItem(id, taxEventType, state, reason) }
     fun updateTaxEvidenceState(id: String, evidenceState: String) = write { repository.updateTaxEvidenceState(id, evidenceState) }

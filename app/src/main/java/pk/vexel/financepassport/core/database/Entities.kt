@@ -253,6 +253,28 @@ data class TaxIssueEntity(
     val createdAtEpochMillis: Long,
 )
 
+/**
+ * A recorded opening or closing wealth position for a tax year (mega-prompt Phase 5D). Without
+ * this, reconciliation has no honest opening figure to reconcile from — it must never be
+ * hardcoded to zero. Captured from the canonical [pk.vexel.financepassport.core.model.FinancialPosition]
+ * at the moment the user records it, so it is a snapshot, not a live-recomputed value.
+ */
+@Entity(tableName = "wealth_snapshots", indices = [Index(value = ["taxYearId", "kind"], unique = true)])
+data class WealthSnapshotEntity(
+    @PrimaryKey val id: String,
+    val taxYearId: String,
+    /** "OPENING" or "CLOSING". */
+    val kind: String,
+    val snapshotDateEpochDay: Long,
+    val liquidFundsMinor: Long,
+    val investmentsValueMinor: Long,
+    val assetsValueMinor: Long,
+    val receivablesValueMinor: Long,
+    val liabilitiesValueMinor: Long,
+    val netWealthMinor: Long,
+    val createdAtEpochMillis: Long,
+)
+
 @Entity(tableName = "wealth_reconciliations", indices = [Index("taxYearId")])
 data class WealthReconciliationEntity(
     @PrimaryKey val id: String,

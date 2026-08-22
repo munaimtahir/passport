@@ -276,4 +276,66 @@ class AppDatabaseTest {
         assertEquals("BANK_PROFIT", activeMapping?.taxEventType)
         assertEquals("Recharacterized as bank profit after reviewing the statement", activeMapping?.overrideReason)
     }
+
+    @Test
+    fun regeneratingAnnualDraftCreatesNewVersionWithoutDeletingPriorLines() = runBlocking {
+        val repository = FinanceRepository(database)
+        repository.addManualTaxItem("BANK_PROFIT", 10_000, "First profit certificate")
+        val firstDraft = repository.prepareAnnualDraft(2026)
+        assertEquals(1, firstDraft.draftVersion)
+        val firstLines = repository.getDraftLines(firstDraft.id)
+        assertEquals(1, firstLines.size)
+
+        repository.addManualTaxItem("DIVIDEND", 5_000, "Dividend received")
+        val secondDraft = repository.prepareAnnualDraft(2026)
+        assertEquals("Regeneration must increment the draft version, not overwrite it", 2, secondDraft.draftVersion)
+        assertTrue(secondDraft.id != firstDraft.id)
+
+        // The prior draft and its lines must still exist, unmutated, after regeneration.
+        val firstLinesAfterRegeneration = repository.getDraftLines(firstDraft.id)
+        assertEquals(firstLines, firstLinesAfterRegeneration)
+        val secondLines = repository.getDraftLines(secondDraft.id)
+        assertEquals(2, secondLines.size)
+        assertEquals(2, database.taxDraftDao().observeDrafts().first().count { it.taxYearId == "PK-2026" })
+    }
+
+    @Test
+    fun reconciliationRequiresAnOpeningSnapshotBeforeRunning() = runBlocking {
+        val repository = FinanceRepository(database)
+        repository.prepareAnnualDraft(2027) // creates the PK-2027 tax_years row
+        val failure = runCatching { repository.calculateReconciliation("PK-2027") }.exceptionOrNull()
+        assertTrue("Reconciling without a recorded opening snapshot must fail loudly, not silently assume zero", failure != null)
+    }
+
+    @Test
+    fun reconciliationUsesRecordedOpeningSnapshotAndScopesEventsToTheTaxYear() = runBlocking {
+        val repository = FinanceRepository(database)
+        val account = database.accountDao().getAll().let { existing ->
+            repository.addAccount("Main", "SAVINGS", 0)
+            database.accountDao().getAll().first { it !in existing }
+        }
+        repository.prepareAnnualDraft(2026) // ensures the PK-2026 tax_years row (Jan 1 - Dec 31 2026) exists
+
+        // Snapshot opening wealth before any of this year's events are recorded, so it is
+        // genuinely the wealth position at the start of the year, not a live-recomputed figure.
+        repository.recordWealthSnapshot(2026, "OPENING", java.time.LocalDate.of(2026, 1, 1))
+        val opening = database.wealthSnapshotDao().get("PK-2026", "OPENING")!!
+        assertEquals(0L, opening.netWealthMinor)
+
+        // An event dated before the tax year must not be counted in this year's inflows/expenditure.
+        repository.addEvent(pk.vexel.financepassport.core.model.FinancialEventType.INCOME, 999_999, account.id, "Prior year income", date = java.time.LocalDate.of(2025, 12, 31))
+        // Events inside the tax year.
+        repository.addEvent(pk.vexel.financepassport.core.model.FinancialEventType.INCOME, 100_000, account.id, "Salary", date = java.time.LocalDate.of(2026, 6, 1))
+        repository.addEvent(pk.vexel.financepassport.core.model.FinancialEventType.EXPENSE, 40_000, account.id, "Rent", date = java.time.LocalDate.of(2026, 6, 2))
+
+        val result = repository.calculateReconciliation("PK-2026")
+        // expected = opening(0) + this-year income(100000) - this-year expense(40000) = 60000;
+        // the 999999 prior-year event must be excluded even though it is in the same account history.
+        assertEquals(60_000L, result.expectedClosing.minorUnits.value)
+
+        val stored = database.reconciliationDao().observeAll().first().first { it.taxYearId == "PK-2026" }
+        assertEquals(0L, stored.openingWealthMinor)
+        assertEquals(100_000L, stored.inflowsMinor)
+        assertEquals(40_000L, stored.expenditureMinor)
+    }
 }

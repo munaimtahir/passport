@@ -18,6 +18,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
@@ -301,8 +303,20 @@ private fun TaxScreen(vm: MainViewModel, padding: PaddingValues) {
         item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Official records", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showOfficialRecord = true }) { Text("Add") } } }
         if (officialRecords.isEmpty()) item { Text("No official records yet. Sensitive identifiers are encrypted and masked.") }
         items(officialRecords, key = { it.id }) { record -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text(record.title, style = MaterialTheme.typography.titleMedium); Text("${record.recordType} · ${record.maskedIdentifier ?: "No identifier"}") } } }
+        item {
+            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, androidx.compose.ui.Alignment.CenterVertically) {
+                Text("Tax year", style = MaterialTheme.typography.titleMedium)
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    IconButton(onClick = { vm.selectTaxYear(vm.selectedTaxYear - 1) }) { Icon(Icons.Default.ChevronLeft, "Previous tax year") }
+                    Text(vm.selectedTaxYearId, style = MaterialTheme.typography.titleMedium)
+                    IconButton(onClick = { vm.selectTaxYear(vm.selectedTaxYear + 1) }, enabled = vm.selectedTaxYear < java.time.LocalDate.now().year) { Icon(Icons.Default.ChevronRight, "Next tax year") }
+                }
+            }
+        }
+        item { Text("Selecting a year works on that year's draft, snapshots and reconciliation below — it never changes past years' saved history.", style = MaterialTheme.typography.bodySmall) }
         item { Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) { Button(onClick = { showManualTaxItem = true }, modifier = Modifier.weight(1f)) { Text("Add tax item") }; Button(onClick = { vm.prepareAnnualDraft() }, modifier = Modifier.weight(1f)) { Text("Prepare draft") } } }
         if (vm.draftMessage != null) item { Text(vm.draftMessage!!, color = MaterialTheme.colorScheme.primary) }
+        item { Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = { vm.recordWealthSnapshot("OPENING") }, modifier = Modifier.weight(1f)) { Text("Record opening snapshot") }; OutlinedButton(onClick = { vm.recordWealthSnapshot("CLOSING") }, modifier = Modifier.weight(1f)) { Text("Record closing snapshot") } } }
         item { Button(onClick = { vm.calculateReconciliation() }, modifier = Modifier.fillMaxWidth()) { Text("Reconcile recorded wealth") } }
         if (vm.reconciliationMessage != null) item { Text(vm.reconciliationMessage!!, color = MaterialTheme.colorScheme.primary) }
         item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text("Annual review readiness", style = MaterialTheme.typography.titleMedium); Text("${readiness.evidenceResolvedCount}/${readiness.totalItemCount} tax item(s) have evidence status resolved"); Text("${readiness.unmappedCount} item(s) need classification review · ${duplicateCandidates.size} duplicate candidate group(s)"); Text("These are workflow signals, not a statement of tax correctness.", style = MaterialTheme.typography.bodySmall) } } }

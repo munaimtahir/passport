@@ -22,6 +22,7 @@ import androidx.room.RoomDatabase
         TaxDraftLineEntity::class,
         TaxIssueEntity::class,
         WealthReconciliationEntity::class,
+        WealthSnapshotEntity::class,
         CalendarItemEntity::class,
         DocumentEntity::class,
         DocumentLinkEntity::class,
@@ -29,7 +30,7 @@ import androidx.room.RoomDatabase
         ChangeLogEntity::class,
         BudgetEntity::class,
     ],
-    version = 9,
+    version = 10,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -41,10 +42,12 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun documentLinkDao(): DocumentLinkDao
     abstract fun taxItemDao(): TaxItemDao
     abstract fun taxMappingDao(): TaxMappingDao
+    abstract fun taxYearDao(): TaxYearDao
     abstract fun taxDraftDao(): TaxDraftDao
     abstract fun taxIssueDao(): TaxIssueDao
     abstract fun calendarDao(): CalendarDao
     abstract fun reconciliationDao(): ReconciliationDao
+    abstract fun wealthSnapshotDao(): WealthSnapshotDao
     abstract fun investmentDao(): InvestmentDao
     abstract fun receivableDao(): ReceivableDao
     abstract fun goalDao(): GoalDao

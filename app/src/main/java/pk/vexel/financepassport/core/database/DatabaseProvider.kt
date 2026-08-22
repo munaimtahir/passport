@@ -92,9 +92,16 @@ object DatabaseProvider {
         }
     }
 
+    val MIGRATION_9_10: Migration = object : Migration(9, 10) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS wealth_snapshots (id TEXT NOT NULL PRIMARY KEY, taxYearId TEXT NOT NULL, kind TEXT NOT NULL, snapshotDateEpochDay INTEGER NOT NULL, liquidFundsMinor INTEGER NOT NULL, investmentsValueMinor INTEGER NOT NULL, assetsValueMinor INTEGER NOT NULL, receivablesValueMinor INTEGER NOT NULL, liabilitiesValueMinor INTEGER NOT NULL, netWealthMinor INTEGER NOT NULL, createdAtEpochMillis INTEGER NOT NULL)")
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_wealth_snapshots_taxYearId_kind ON wealth_snapshots(taxYearId, kind)")
+        }
+    }
+
     /** The single migration registry used by production and restore validation. */
     val ALL_MIGRATIONS = arrayOf(
         MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
-        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9,
+        MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
     )
 }

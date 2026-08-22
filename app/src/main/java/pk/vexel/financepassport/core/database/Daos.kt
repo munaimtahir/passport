@@ -137,6 +137,29 @@ interface ReconciliationDao {
 }
 
 @Dao
+interface TaxYearDao {
+    @Query("SELECT * FROM tax_years WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): TaxYearEntity?
+
+    @Query("SELECT * FROM tax_years ORDER BY yearLabel DESC")
+    fun observeAll(): Flow<List<TaxYearEntity>>
+}
+
+/** Snapshots are a user-recorded convenience, not an immutable source fact: re-recording the same
+ * kind for a tax year replaces it, unlike financial events or tax mappings. */
+@Dao
+interface WealthSnapshotDao {
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(snapshot: WealthSnapshotEntity)
+
+    @Query("SELECT * FROM wealth_snapshots WHERE taxYearId = :taxYearId AND kind = :kind LIMIT 1")
+    suspend fun get(taxYearId: String, kind: String): WealthSnapshotEntity?
+
+    @Query("SELECT * FROM wealth_snapshots WHERE taxYearId = :taxYearId ORDER BY kind")
+    fun observeForYear(taxYearId: String): Flow<List<WealthSnapshotEntity>>
+}
+
+@Dao
 interface DocumentDao {
     @Query("SELECT * FROM documents ORDER BY createdAtEpochMillis")
     suspend fun getAll(): List<DocumentEntity>

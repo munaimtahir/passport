@@ -65,6 +65,7 @@ class FinanceRepository(private val db: AppDatabase) {
     val drafts: Flow<List<TaxAnnualDraftEntity>> = db.taxDraftDao().observeDrafts()
     val taxIssues: Flow<List<TaxIssueEntity>> = db.taxIssueDao().observeAll()
     val reconciliations: Flow<List<WealthReconciliationEntity>> = db.reconciliationDao().observeAll()
+    val taxYears: Flow<List<TaxYearEntity>> = db.taxYearDao().observeAll()
     val recurringItems: Flow<List<RecurringItemEntity>> = db.recurringItemDao().observeActive()
     val budgets: Flow<List<BudgetEntity>> = db.budgetDao().observeActive()
     val totals: Flow<Pair<Money, Money>> = combine(db.financialEventDao().observeIncomeMinor(), db.financialEventDao().observeExpenseMinor()) { income, expense ->
@@ -428,7 +429,7 @@ class FinanceRepository(private val db: AppDatabase) {
         }
         val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size
         return try {
-            BackupPackageService().create(snapshotFile.readBytes(), documents, BuildConfig.VERSION_NAME, 9, password, recordCount).payload
+            BackupPackageService().create(snapshotFile.readBytes(), documents, BuildConfig.VERSION_NAME, 10, password, recordCount).payload
         } finally {
             snapshotFile.delete()
         }
@@ -451,7 +452,7 @@ class FinanceRepository(private val db: AppDatabase) {
                 BackupDiskFile("documents/${File(document.localEncryptedPath).name}", File(document.localEncryptedPath))
             }
             val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size
-            BackupPackageService().createStreaming(snapshotFile, documents, BuildConfig.VERSION_NAME, 9, password, recordCount, output)
+            BackupPackageService().createStreaming(snapshotFile, documents, BuildConfig.VERSION_NAME, 10, password, recordCount, output)
             return output
         } catch (failure: Throwable) {
             output.delete()
@@ -461,10 +462,14 @@ class FinanceRepository(private val db: AppDatabase) {
         }
     }
 
-    suspend fun prepareAnnualDraft(): TaxAnnualDraftEntity {
-        val year = LocalDate.now().year
-        val yearId = "PK-$year"
-        db.openHelper.writableDatabase.execSQL("INSERT OR IGNORE INTO tax_years (id, jurisdictionCode, yearLabel, startDateEpochDay, endDateEpochDay, rulesetVersion, status) VALUES (?, 'PK', ?, ?, ?, 'pk-structural-1', 'OPEN')", arrayOf<Any>(yearId, year.toString(), LocalDate.of(year, 1, 1).toEpochDay(), LocalDate.of(year, 12, 31).toEpochDay()))
+    /**
+     * Generates (or regenerates, as a new version) the annual draft for [year] — defaults to the
+     * current year but any prior tax year with captured tax items can be selected (Phase 5A: a
+     * selected-year workspace, not just "now"). Regeneration never overwrites a prior draft: see
+     * [pk.vexel.financepassport.core.database.TaxDraftDao.maxVersion].
+     */
+    suspend fun prepareAnnualDraft(year: Int = LocalDate.now().year): TaxAnnualDraftEntity {
+        val yearId = ensureTaxYearExists(year)
         val items = db.taxItemDao().getAll().filter { it.taxYearId == yearId && it.reviewState != "EXCLUDED" }
         val rules = defaultPakistanStructuralRules().copy(taxYear = year.toString())
         val domainYear = TaxYear(yearId, "PK", year.toString(), LocalDate.of(year, 1, 1).toEpochDay(), LocalDate.of(year, 12, 31).toEpochDay(), rules.version)
@@ -482,18 +487,60 @@ class FinanceRepository(private val db: AppDatabase) {
 
     suspend fun getDraftLines(draftId: String): List<TaxDraftLineEntity> = db.taxDraftDao().getLines(draftId)
 
-    suspend fun calculateCurrentReconciliation(): WealthReconciliationResult {
-        val allEvents = db.financialEventDao().getAll()
-        val income = allEvents.filter { it.eventType == "INCOME" }.sumOf { it.amountMinor }
-        val expense = allEvents.filter { it.eventType == "EXPENSE" }.sumOf { it.amountMinor }
-        // Recorded closing wealth uses the same canonical net-worth calculation as Home/Wealth
-        // (liquid funds, investment cost basis, assets and receivables, less liabilities) rather
-        // than assets-minus-liabilities alone, so reconciliation cannot silently ignore cash or
-        // investment positions that Home already shows the user.
-        val recordedClosing = financialPosition.first().netWorthMinor
-        val result = reconcileWealth(WealthReconciliationInput(Money(MinorUnits(0)), Money(MinorUnits(income)), Money(MinorUnits(expense)), Money(MinorUnits(0)), Money(MinorUnits(0)), Money(MinorUnits(recordedClosing))))
+    /** Idempotently ensures a `tax_years` row exists for [year] so a snapshot, draft or
+     * reconciliation can be recorded against it regardless of which of the three the user does
+     * first. Returns the tax year's id. */
+    private suspend fun ensureTaxYearExists(year: Int): String {
+        val yearId = "PK-$year"
+        val rulesetVersion = defaultPakistanStructuralRules().version
+        db.openHelper.writableDatabase.execSQL(
+            "INSERT OR IGNORE INTO tax_years (id, jurisdictionCode, yearLabel, startDateEpochDay, endDateEpochDay, rulesetVersion, status) VALUES (?, 'PK', ?, ?, ?, ?, 'OPEN')",
+            arrayOf<Any>(yearId, year.toString(), LocalDate.of(year, 1, 1).toEpochDay(), LocalDate.of(year, 12, 31).toEpochDay(), rulesetVersion),
+        )
+        return yearId
+    }
+
+    /**
+     * Records the current canonical [FinancialPosition] as the opening or closing wealth snapshot
+     * for [year] (Phase 5D). Re-recording the same kind replaces the prior snapshot — this is
+     * a working estimate the user can correct, not an immutable source fact; a reconciliation
+     * already generated from an earlier snapshot keeps its own recorded figures regardless.
+     */
+    suspend fun recordWealthSnapshot(year: Int, kind: String, date: LocalDate = LocalDate.now()) {
+        require(kind == "OPENING" || kind == "CLOSING") { "Snapshot kind must be OPENING or CLOSING" }
+        val taxYearId = ensureTaxYearExists(year)
+        val position = financialPosition.first()
+        db.wealthSnapshotDao().upsert(
+            WealthSnapshotEntity(
+                UUID.randomUUID().toString(), taxYearId, kind, date.toEpochDay(),
+                position.liquidFundsMinor, position.investmentsValueMinor, position.assetsValueMinor,
+                position.receivablesValueMinor, position.liabilitiesValueMinor, position.netWorthMinor,
+                Instant.now().toEpochMilli(),
+            ),
+        )
+    }
+
+    /**
+     * Reconciles [taxYearId]'s recorded closing wealth against what an opening position plus the
+     * year's recognized income/expenditure would predict (Phase 5E). Requires an opening snapshot
+     * to exist for the year — reconciliation must never silently treat opening wealth as zero — and
+     * scopes income/expenditure to events that actually fall within the tax year's date range,
+     * rather than the entire event history.
+     */
+    suspend fun calculateReconciliation(taxYearId: String): WealthReconciliationResult {
+        val year = db.taxYearDao().getById(taxYearId) ?: error("Unknown tax year: $taxYearId. Prepare a draft or record a snapshot for it first.")
+        val opening = db.wealthSnapshotDao().get(taxYearId, "OPENING")
+            ?: error("Record an opening wealth snapshot for $taxYearId before reconciling.")
+        val closing = db.wealthSnapshotDao().get(taxYearId, "CLOSING")
+        val eventsInYear = db.financialEventDao().getAll().filter { it.dateEpochDay in year.startDateEpochDay..year.endDateEpochDay }
+        val income = eventsInYear.filter { it.eventType == "INCOME" }.sumOf { it.amountMinor }
+        val expense = eventsInYear.filter { it.eventType == "EXPENSE" }.sumOf { it.amountMinor }
+        // A closing snapshot is preferred; falling back to the live canonical position only makes
+        // sense for a year that has not been formally closed out yet.
+        val recordedClosing = closing?.netWealthMinor ?: financialPosition.first().netWorthMinor
+        val result = reconcileWealth(WealthReconciliationInput(Money(MinorUnits(opening.netWealthMinor)), Money(MinorUnits(income)), Money(MinorUnits(expense)), Money(MinorUnits(0)), Money(MinorUnits(0)), Money(MinorUnits(recordedClosing))))
         val now = Instant.now().toEpochMilli()
-        db.reconciliationDao().insert(WealthReconciliationEntity(UUID.randomUUID().toString(), "PK-${LocalDate.now().year}", 0, income, expense, 0, 0, result.expectedClosing.minorUnits.value, recordedClosing, result.unexplainedDifference.minorUnits.value, result.calculation))
+        db.reconciliationDao().insert(WealthReconciliationEntity(UUID.randomUUID().toString(), taxYearId, opening.netWealthMinor, income, expense, 0, 0, result.expectedClosing.minorUnits.value, recordedClosing, result.unexplainedDifference.minorUnits.value, result.calculation))
         return result
     }
 }

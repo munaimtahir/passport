@@ -97,4 +97,27 @@ class DatabaseMigrationTest {
             }
         }
     }
+
+    @Test
+    fun migrateV9ToV10AddsWealthSnapshotsTable() {
+        helper.createDatabase("migration-v9", 9).apply {
+            execSQL("INSERT INTO tax_years (id, jurisdictionCode, yearLabel, startDateEpochDay, endDateEpochDay, rulesetVersion, status) VALUES ('PK-2026', 'PK', '2026', 0, 365, 'pk-structural-1', 'OPEN')")
+            close()
+        }
+
+        helper.runMigrationsAndValidate("migration-v9", 10, true, DatabaseProvider.MIGRATION_9_10).use { database ->
+            database.query("SELECT COUNT(*) FROM tax_years WHERE id = 'PK-2026'").use { cursor ->
+                cursor.moveToFirst()
+                check(cursor.getInt(0) == 1) { "Pre-existing tax years must survive the migration" }
+            }
+            database.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'wealth_snapshots'").use { cursor ->
+                check(cursor.moveToFirst())
+            }
+            database.execSQL("INSERT INTO wealth_snapshots (id, taxYearId, kind, snapshotDateEpochDay, liquidFundsMinor, investmentsValueMinor, assetsValueMinor, receivablesValueMinor, liabilitiesValueMinor, netWealthMinor, createdAtEpochMillis) VALUES ('snap-1', 'PK-2026', 'OPENING', 0, 0, 0, 0, 0, 0, 0, 1)")
+            database.query("SELECT COUNT(*) FROM wealth_snapshots WHERE taxYearId = 'PK-2026'").use { cursor ->
+                cursor.moveToFirst()
+                check(cursor.getInt(0) == 1) { "A snapshot row must be insertable against a pre-existing tax year" }
+            }
+        }
+    }
 }
