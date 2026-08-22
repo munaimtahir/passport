@@ -53,7 +53,7 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | --- | --- | --- | --- |
 | 0 — Baseline freeze | DONE | `febea67` | This document created; host baseline re-verified green |
 | 1 — Onboarding/dates/privacy/UI foundation | DONE (scoped) | `9b8d9ed` | See detail below |
-| 2 — Canonical money/wealth completion | DONE (scoped) | (pending — see below) | See detail below |
+| 2 — Canonical money/wealth completion | DONE (scoped) | `eb6cbd5` | See detail below |
 | 3 — Canonical home dashboard | NOT STARTED | — | |
 | 4 — Versioned tax capture engine | NOT STARTED | — | |
 | 5 — Annual workspace/reconciliation | NOT STARTED | — | |
