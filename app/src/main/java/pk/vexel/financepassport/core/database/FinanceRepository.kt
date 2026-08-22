@@ -3,15 +3,18 @@ package pk.vexel.financepassport.core.database
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import pk.vexel.financepassport.core.model.FinancialEvent
 import pk.vexel.financepassport.core.model.FinancialEventType
 import pk.vexel.financepassport.core.model.Money
 import pk.vexel.financepassport.core.model.MinorUnits
 import pk.vexel.financepassport.core.model.CategoryBudgetStatus
+import pk.vexel.financepassport.core.model.FinancialPosition
 import pk.vexel.financepassport.core.model.GoalProgress
 import pk.vexel.financepassport.core.model.RecurringFrequency
 import pk.vexel.financepassport.core.model.calculateCategoryBudgets
+import pk.vexel.financepassport.core.model.calculateFinancialPosition
 import pk.vexel.financepassport.core.model.calculateGoalProgress
 import pk.vexel.financepassport.core.model.advanceRecurringDueDate
 import pk.vexel.financepassport.core.model.toYearMonth
@@ -73,17 +76,55 @@ class FinanceRepository(private val db: AppDatabase) {
         goals.map { goal -> goal to calculateGoalProgress(goal.currentAmountMinor, goal.targetAmountMinor, goal.targetDateEpochDay) }
     }
 
-    fun accountMovement(accountId: String): Flow<Long> = db.financialEventDao().observeAccountMovement(accountId)
-
-    suspend fun addAccount(name: String, type: String, openingBalanceMinor: Long, currency: String = "PKR") {
-        val now = Instant.now().toEpochMilli()
-        db.accountDao().upsert(AccountEntity(UUID.randomUUID().toString(), name.trim(), null, type, null, null, currency, openingBalanceMinor, LocalDate.now().toEpochDay(), "ACTIVE", null, now, now))
+    /**
+     * The one canonical net-worth/financial-position source of truth. Home, Wealth, Reports, Tax
+     * and Reconciliation must read this instead of recomputing their own totals.
+     */
+    val financialPosition: Flow<FinancialPosition> = run {
+        val monthStart = LocalDate.now().toYearMonth().atDay(1).toEpochDay()
+        val monthEnd = LocalDate.now().toYearMonth().atEndOfMonth().toEpochDay()
+        combine(
+            db.accountDao().observeActive(),
+            db.financialEventDao().observeActiveAccountsMovement(),
+            db.financialEventDao().observeIncomeMinorInRange(monthStart, monthEnd),
+            db.financialEventDao().observeExpenseMinorInRange(monthStart, monthEnd),
+        ) { accounts, movement, monthlyIncome, monthlyExpense ->
+            AccountsSnapshot(accounts.sumOf { it.openingBalanceMinor }, movement, monthlyIncome, monthlyExpense)
+        }.combine(
+            combine(db.wealthDao().observeAssets(), db.wealthDao().observeLiabilities(), db.investmentDao().observeAll(), db.receivableDao().observeAll(), ::WealthSnapshot),
+        ) { accountsSnapshot, wealthSnapshot ->
+            calculateFinancialPosition(
+                accountsSnapshot.openingBalanceMinor,
+                accountsSnapshot.movementMinor,
+                wealthSnapshot.assets,
+                wealthSnapshot.liabilities,
+                wealthSnapshot.investments,
+                wealthSnapshot.receivables,
+                accountsSnapshot.monthlyIncomeMinor,
+                accountsSnapshot.monthlyExpenseMinor,
+            )
+        }
     }
 
-    suspend fun updateAccount(id: String, name: String, openingBalanceMinor: Long) {
+    private data class AccountsSnapshot(val openingBalanceMinor: Long, val movementMinor: Long, val monthlyIncomeMinor: Long, val monthlyExpenseMinor: Long)
+    private data class WealthSnapshot(val assets: List<AssetEntity>, val liabilities: List<LiabilityEntity>, val investments: List<InvestmentEventEntity>, val receivables: List<ReceivableEntity>)
+
+    fun accountMovement(accountId: String): Flow<Long> = db.financialEventDao().observeAccountMovement(accountId)
+
+    suspend fun addAccount(name: String, type: String, openingBalanceMinor: Long, currency: String = "PKR", institution: String? = null, notes: String? = null) {
+        val now = Instant.now().toEpochMilli()
+        db.accountDao().upsert(
+            AccountEntity(
+                UUID.randomUUID().toString(), name.trim(), institution?.trim()?.takeIf { it.isNotEmpty() }, type, null, null,
+                currency, openingBalanceMinor, LocalDate.now().toEpochDay(), "ACTIVE", notes?.trim()?.takeIf { it.isNotEmpty() }, now, now,
+            ),
+        )
+    }
+
+    suspend fun updateAccount(id: String, name: String, openingBalanceMinor: Long, institution: String? = null, notes: String? = null) {
         require(name.isNotBlank() && openingBalanceMinor >= 0) { "Account details are invalid" }
         require(db.accountDao().getById(id) != null) { "Account not found" }
-        db.accountDao().updateDetails(id, name.trim(), openingBalanceMinor, Instant.now().toEpochMilli())
+        db.accountDao().updateDetails(id, name.trim(), openingBalanceMinor, institution?.trim()?.takeIf { it.isNotEmpty() }, notes?.trim()?.takeIf { it.isNotEmpty() }, Instant.now().toEpochMilli())
     }
 
     suspend fun archiveAccount(id: String) {
@@ -118,9 +159,10 @@ class FinanceRepository(private val db: AppDatabase) {
         db.wealthDao().updateLiabilityOutstanding(id, remaining, if (remaining == 0L) "SETTLED" else "ACTIVE")
     }
 
-    suspend fun addInvestmentEvent(securityName: String, type: String, amountMinor: Long, quantityMinor: Long = 0, feesMinor: Long = 0, taxWithheldMinor: Long = 0) {
+    suspend fun addInvestmentEvent(securityName: String, type: String, amountMinor: Long, quantityMinor: Long = 0, feesMinor: Long = 0, taxWithheldMinor: Long = 0, accountLabel: String = "Manual") {
         require(amountMinor >= 0 && quantityMinor >= 0 && feesMinor >= 0 && taxWithheldMinor >= 0)
-        db.investmentDao().insert(InvestmentEventEntity(UUID.randomUUID().toString(), "manual", securityName.trim(), type, LocalDate.now().toEpochDay(), quantityMinor, amountMinor, feesMinor, taxWithheldMinor, "PKR"))
+        val normalizedAccountLabel = accountLabel.trim().takeIf { it.isNotEmpty() } ?: "Manual"
+        db.investmentDao().insert(InvestmentEventEntity(UUID.randomUUID().toString(), normalizedAccountLabel, securityName.trim(), type, LocalDate.now().toEpochDay(), quantityMinor, amountMinor, feesMinor, taxWithheldMinor, "PKR"))
     }
 
     suspend fun addReceivable(title: String, counterparty: String, amountMinor: Long) {
@@ -398,11 +440,14 @@ class FinanceRepository(private val db: AppDatabase) {
         val allEvents = db.financialEventDao().getAll()
         val income = allEvents.filter { it.eventType == "INCOME" }.sumOf { it.amountMinor }
         val expense = allEvents.filter { it.eventType == "EXPENSE" }.sumOf { it.amountMinor }
-        val assets = db.wealthDao().getAllAssets().sumOf { it.currentEstimatedValueMinor }
-        val liabilities = db.wealthDao().getAllLiabilities().sumOf { it.outstandingAmountMinor }
-        val result = reconcileWealth(WealthReconciliationInput(Money(MinorUnits(0)), Money(MinorUnits(income)), Money(MinorUnits(expense)), Money(MinorUnits(0)), Money(MinorUnits(0)), Money(MinorUnits(assets - liabilities))))
+        // Recorded closing wealth uses the same canonical net-worth calculation as Home/Wealth
+        // (liquid funds, investment cost basis, assets and receivables, less liabilities) rather
+        // than assets-minus-liabilities alone, so reconciliation cannot silently ignore cash or
+        // investment positions that Home already shows the user.
+        val recordedClosing = financialPosition.first().netWorthMinor
+        val result = reconcileWealth(WealthReconciliationInput(Money(MinorUnits(0)), Money(MinorUnits(income)), Money(MinorUnits(expense)), Money(MinorUnits(0)), Money(MinorUnits(0)), Money(MinorUnits(recordedClosing))))
         val now = Instant.now().toEpochMilli()
-        db.reconciliationDao().insert(WealthReconciliationEntity(UUID.randomUUID().toString(), "PK-${LocalDate.now().year}", 0, income, expense, 0, 0, result.expectedClosing.minorUnits.value, assets - liabilities, result.unexplainedDifference.minorUnits.value, result.calculation))
+        db.reconciliationDao().insert(WealthReconciliationEntity(UUID.randomUUID().toString(), "PK-${LocalDate.now().year}", 0, income, expense, 0, 0, result.expectedClosing.minorUnits.value, recordedClosing, result.unexplainedDifference.minorUnits.value, result.calculation))
         return result
     }
 }

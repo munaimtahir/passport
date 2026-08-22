@@ -188,6 +188,52 @@ class AppDatabaseTest {
     }
 
     @Test
+    fun accountMetadataPersistsInstitutionAndNotes() = runBlocking {
+        val repository = FinanceRepository(database)
+        repository.addAccount("Salary account", "CURRENT", 50_000, institution = "Meezan Bank", notes = "Primary salary account")
+        val account = database.accountDao().getAll().single()
+        assertEquals("Meezan Bank", account.institution)
+        assertEquals("Primary salary account", account.notes)
+        repository.updateAccount(account.id, "Salary account", 50_000, institution = "HBL", notes = "Switched bank")
+        val updated = database.accountDao().getById(account.id)
+        assertEquals("HBL", updated?.institution)
+        assertEquals("Switched bank", updated?.notes)
+    }
+
+    @Test
+    fun investmentEventUsesProvidedAccountLabelInsteadOfAHardcodedConstant() = runBlocking {
+        val repository = FinanceRepository(database)
+        repository.addInvestmentEvent("PSX Fund", "BUY", 100_000, 10, accountLabel = "AKD Securities")
+        assertEquals("AKD Securities", database.investmentDao().getAll().single().investmentAccountId)
+        repository.addInvestmentEvent("PSX Fund", "BUY", 50_000, 5)
+        assertEquals("Manual", database.investmentDao().getAll().first { it.grossAmountMinor == 50_000L }.investmentAccountId)
+    }
+
+    @Test
+    fun canonicalFinancialPositionCombinesAccountsWealthAndMonthlyActivity() = runBlocking {
+        val repository = FinanceRepository(database)
+        repository.addAccount("Cash", "CASH", 100_000)
+        val account = database.accountDao().getAll().single()
+        val today = java.time.LocalDate.now().toEpochDay()
+        database.financialEventDao().insertAll(listOf(
+            FinancialEventEntity("salary", "INCOME", today, 30_000, "PKR", account.id, null, "Salary", null, "UNKNOWN", null, 1, 1),
+            FinancialEventEntity("groceries", "EXPENSE", today, 5_000, "PKR", account.id, null, "Groceries", null, "UNKNOWN", null, 1, 1),
+        ))
+        repository.addAsset("Car", "VEHICLE", 800_000)
+        repository.addLiability("Loan", "PERSONAL", 200_000)
+        repository.addReceivable("Advance", "Friend", 50_000)
+
+        val position = repository.financialPosition.first()
+        assertEquals(100_000L + 25_000L, position.liquidFundsMinor)
+        assertEquals(800_000L, position.assetsValueMinor)
+        assertEquals(200_000L, position.liabilitiesValueMinor)
+        assertEquals(50_000L, position.receivablesValueMinor)
+        assertEquals(30_000L, position.monthlyIncomeMinor)
+        assertEquals(5_000L, position.monthlyExpenseMinor)
+        assertEquals(position.liquidFundsMinor + position.assetsValueMinor + position.receivablesValueMinor - position.liabilitiesValueMinor, position.netWorthMinor)
+    }
+
+    @Test
     fun accountBalanceAndEventCountUseDatabaseAggregates() = runBlocking {
         val repository = FinanceRepository(database)
         repository.addAccount("Main", "CASH", 100_000)

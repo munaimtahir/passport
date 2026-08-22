@@ -39,6 +39,7 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     val taxIssues = repository.taxIssues.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val reconciliations = repository.reconciliations.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val recurringItems = repository.recurringItems.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val financialPosition = repository.financialPosition.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null as pk.vexel.financepassport.core.model.FinancialPosition?)
     var draftMessage by mutableStateOf<String?>(null)
     var reconciliationMessage by mutableStateOf<String?>(null)
     var errorMessage by mutableStateOf<String?>(null)
@@ -48,9 +49,9 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
         runCatching { action() }.onFailure { errorMessage = "Could not save this change. Check the fields and try again." }
     }
 
-    fun addAccount(name: String, type: String, openingBalanceMinor: Long) = write { repository.addAccount(name, type, openingBalanceMinor) }
+    fun addAccount(name: String, type: String, openingBalanceMinor: Long, institution: String? = null, notes: String? = null) = write { repository.addAccount(name, type, openingBalanceMinor, institution = institution, notes = notes) }
     fun accountMovement(accountId: String) = repository.accountMovement(accountId)
-    fun updateAccount(id: String, name: String, openingBalanceMinor: Long) = write { repository.updateAccount(id, name, openingBalanceMinor) }
+    fun updateAccount(id: String, name: String, openingBalanceMinor: Long, institution: String? = null, notes: String? = null) = write { repository.updateAccount(id, name, openingBalanceMinor, institution, notes) }
     fun archiveAccount(id: String) = write { repository.archiveAccount(id) }
     fun addEvent(type: FinancialEventType, amountMinor: Long, accountId: String, description: String, category: String? = null, date: LocalDate = LocalDate.now()) = write { repository.addEvent(type, amountMinor, accountId, description, category, date = date) }
     fun addRecurringItem(context: android.content.Context, title: String, type: FinancialEventType, amountMinor: Long, accountId: String, category: String?, frequency: String, delayDays: Long) = write { repository.addRecurringItem(context, title, type, amountMinor, accountId, category, frequency, delayDays) }
@@ -61,7 +62,7 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     fun disposeAsset(id: String, valueMinor: Long) = write { repository.disposeAsset(id, valueMinor) }
     fun addLiability(title: String, valueMinor: Long) = write { repository.addLiability(title, "OTHER", valueMinor) }
     fun recordLiabilityPayment(id: String, amountMinor: Long) = write { repository.recordLiabilityPayment(id, amountMinor) }
-    fun addInvestmentEvent(security: String, type: String, amountMinor: Long, quantityMinor: Long = 0) = write { repository.addInvestmentEvent(security, type, amountMinor, quantityMinor) }
+    fun addInvestmentEvent(security: String, type: String, amountMinor: Long, quantityMinor: Long = 0, accountLabel: String = "Manual") = write { repository.addInvestmentEvent(security, type, amountMinor, quantityMinor, accountLabel = accountLabel) }
     fun addReceivable(title: String, counterparty: String, amountMinor: Long) = write { repository.addReceivable(title, counterparty, amountMinor) }
     fun recordReceivablePayment(id: String, amountMinor: Long) = write { repository.recordReceivablePayment(id, amountMinor) }
     fun addGoal(title: String, targetMinor: Long) = write { repository.addGoal(title, targetMinor) }

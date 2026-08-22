@@ -22,8 +22,8 @@ interface AccountDao {
     @Query("UPDATE accounts SET status = 'ARCHIVED', updatedAtEpochMillis = :updatedAt WHERE id = :id")
     suspend fun archive(id: String, updatedAt: Long)
 
-    @Query("UPDATE accounts SET name = :name, openingBalanceMinor = :openingBalanceMinor, updatedAtEpochMillis = :updatedAt WHERE id = :id")
-    suspend fun updateDetails(id: String, name: String, openingBalanceMinor: Long, updatedAt: Long)
+    @Query("UPDATE accounts SET name = :name, openingBalanceMinor = :openingBalanceMinor, institution = :institution, notes = :notes, updatedAtEpochMillis = :updatedAt WHERE id = :id")
+    suspend fun updateDetails(id: String, name: String, openingBalanceMinor: Long, institution: String?, notes: String?, updatedAt: Long)
 }
 
 @Dao
@@ -205,6 +205,24 @@ interface FinancialEventDao {
 
     @Query("SELECT COALESCE(SUM(amountMinor), 0) FROM financial_events WHERE eventType = 'EXPENSE' AND deletedAtEpochMillis IS NULL")
     fun observeExpenseMinor(): Flow<Long>
+
+    @Query(
+        "SELECT COALESCE(SUM(CASE WHEN eventType = 'EXPENSE' THEN -amountMinor ELSE amountMinor END), 0) " +
+            "FROM financial_events WHERE deletedAtEpochMillis IS NULL AND accountId IN (SELECT id FROM accounts WHERE status = 'ACTIVE')",
+    )
+    fun observeActiveAccountsMovement(): Flow<Long>
+
+    @Query(
+        "SELECT COALESCE(SUM(amountMinor), 0) FROM financial_events " +
+            "WHERE eventType = 'INCOME' AND deletedAtEpochMillis IS NULL AND dateEpochDay BETWEEN :startEpochDay AND :endEpochDay",
+    )
+    fun observeIncomeMinorInRange(startEpochDay: Long, endEpochDay: Long): Flow<Long>
+
+    @Query(
+        "SELECT COALESCE(SUM(amountMinor), 0) FROM financial_events " +
+            "WHERE eventType = 'EXPENSE' AND deletedAtEpochMillis IS NULL AND dateEpochDay BETWEEN :startEpochDay AND :endEpochDay",
+    )
+    fun observeExpenseMinorInRange(startEpochDay: Long, endEpochDay: Long): Flow<Long>
 }
 
 @Dao

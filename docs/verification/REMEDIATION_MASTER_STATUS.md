@@ -33,14 +33,14 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 1 Design/nav/onboarding | PARTIAL | Phase 1 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Onboarding flow (`Onboarding.kt`), global privacy masking (`AppPreferences`, `LocalPrivacyMode`), and a reusable `DateField` landed this phase; see Phase 1 log row for what remains |
 | 2 Local data | PARTIAL | Phase 1/2 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Schema v8 migrations verified by JVM test; income/expense/transfer forms now use `DateField` instead of a silent `LocalDate.now()` default; most other historical-date entry points remain for Phase 2 |
 | 3 Security | PARTIAL | Phase 8 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | PIN/biometric/Keystore exist; full lifecycle/device evidence deferred |
-| 4 Money | PARTIAL | Phase 2 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Accounts/transfers work; historical dates, recurring UI gaps targeted |
-| 5 Wealth | PARTIAL | Phase 2 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Domain math exists; valuation/disposal/repayment UI mostly dormant |
+| 4 Money | PARTIAL | Phase 2 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Account institution/notes metadata now captured; canonical liquid-funds calc added (`FinancialPosition`) |
+| 5 Wealth | PARTIAL | Phase 2 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Valuation/disposal/repayment/partial-receipt dialogs were already UI-wired (audit predates this); investment holdings summary and non-hardcoded account label added this phase |
 | 6 Home | **BROKEN** | Phase 3 | NOT IMPLEMENTED (canonical net worth) | "Net recorded movement" mislabeled as net worth; must be replaced |
 | 7 Vault/records | PARTIAL | Phase 6 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Crypto/storage solid; dependency-safe delete, search, expiry absent |
 | 8 Tax capture | PARTIAL | Phase 4 | NOT IMPLEMENTED (remapping/taxonomy/drill-down) | Source→tax-item link exists; lineage/remap/evidence workflow incomplete |
 | 9 Rules engine | PARTIAL | Phase 4 | NOT IMPLEMENTED (JSON schema/parser/validator) | Hardcoded Kotlin map only |
 | 10 Annual workspace | PARTIAL | Phase 5 | NOT IMPLEMENTED (drill-down/versioning) | Draft/issue persistence exists; selected-year workspace + lineage absent |
-| 11 Reconciliation | PARTIAL | Phase 5 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Formula/history primitive + zero-diff fixture exist; UI drill-down absent |
+| 11 Reconciliation | PARTIAL | Phase 5 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Recorded-closing-wealth now sourced from the canonical `FinancialPosition` (was assets-minus-liabilities only, ignoring cash/investments/receivables); UI drill-down still absent (Phase 5) |
 | 12 Reports | PARTIAL | Phase 7 | NOT IMPLEMENTED (preview/full catalog) | Export-only; no in-app preview; raw `/100` formatting |
 | 13 Backup/restore | PARTIAL | Phase 7 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Crypto/staging done; equivalence proof needs device (Phase 10D) |
 | 14 Calendar | PARTIAL | Phase 7 | NOT IMPLEMENTED (expiry/due-date wiring) | Generic reminders exist; document/receivable/tax-review linkage absent |
@@ -53,7 +53,7 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | --- | --- | --- | --- |
 | 0 — Baseline freeze | DONE | `febea67` | This document created; host baseline re-verified green |
 | 1 — Onboarding/dates/privacy/UI foundation | DONE (scoped) | `9b8d9ed` | See detail below |
-| 2 — Canonical money/wealth completion | NOT STARTED | — | |
+| 2 — Canonical money/wealth completion | DONE (scoped) | (pending — see below) | See detail below |
 | 3 — Canonical home dashboard | NOT STARTED | — | |
 | 4 — Versioned tax capture engine | NOT STARTED | — | |
 | 5 — Annual workspace/reconciliation | NOT STARTED | — | |
@@ -115,3 +115,66 @@ no Robolectric dependency; adding one was judged out of scope for this phase.
 Verification: `./gradlew test lint` PASS (BUILD SUCCESSFUL, 2026-08-23); `./gradlew
 assembleDebugAndroidTest` PASS (androidTest sources compile, not run). No emulator/device
 available this session — all of the above is host-side/static verification only.
+
+## Phase 2 detail
+
+**Correction to the audit before starting:** `WealthScreen` in `PassportApp.kt` already had
+UI-wired asset valuation update, asset disposal, liability repayment, and receivable
+partial-receipt dialogs before this phase — the audit's "Wealth maintenance services exist but
+are mostly dormant from UI" finding no longer held even at the audit's own stated HEAD once
+re-checked against actual source. Only the investment side (2H) and account metadata (2A) were
+genuinely dormant/missing as described.
+
+Landed, in priority order:
+
+- **2J Canonical financial calculation domain (highest priority).** Added
+  `core/model/FinancialPosition.kt`: a pure, tested domain function
+  (`calculateFinancialPosition`) producing one `FinancialPosition` (liquid funds, investment cost
+  basis, assets, receivables, liabilities, monthly income/expense, `totalAssetsMinor`,
+  `netWorthMinor`) from entity lists — no live market-price feed is used or invented; investment
+  value is the traceable recorded cost basis. Exposed as `FinanceRepository.financialPosition:
+  Flow<FinancialPosition>`, combining active accounts + a new bounded DAO aggregate
+  (`observeActiveAccountsMovement`, mirroring the existing per-account movement query but across
+  all active accounts) with assets/liabilities/investments/receivables and two new ranged DAO
+  queries for current-month income/expense (`observeIncomeMinorInRange`/
+  `observeExpenseMinorInRange`). Exposed on `MainViewModel.financialPosition` as a
+  `StateFlow<FinancialPosition?>` for Phase 3 (Home) to consume directly — **Home was
+  deliberately not touched this phase**; it still shows the mislabeled "Net recorded movement"
+  and is Phase 3's job per the mega-prompt's own phase boundary.
+  - Also used the same canonical calculation to fix `calculateCurrentReconciliation`'s
+    `recordedClosing` figure, which previously used assets-minus-liabilities only and silently
+    ignored cash/investments/receivables — a real correctness gap, now sourced from
+    `financialPosition.first().netWorthMinor`. Full reconciliation UI/drill-down remains Phase 5.
+- **2H Investments.** Fixed the audit-flagged hardcoded `"manual"` `investmentAccountId`:
+  `addInvestmentEvent`/`MainViewModel.addInvestmentEvent` now take an optional `accountLabel`
+  (defaults to `"Manual"` only when left blank), and the wealth-add dialog exposes an optional
+  "Broker / account" field. Added an investment-holdings summary card per security in
+  `WealthScreen` using the existing (previously dormant) `calculateInvestmentPosition` — shows
+  quantity, cost basis, realized gain/loss, and withholding-net income, with an explicit note that
+  no live price is used. There is still no dedicated investment-account entity/table (accounts are
+  just a free-text label on each event) — building real multi-account investment ledgering would
+  need a new entity and migration, judged out of scope for this pass.
+- **2A Accounts.** `AccountEntity` already had `institution`/`notes` columns (added in an earlier
+  session, never migrated) that the add/edit UI never exposed — no migration was needed, just
+  wiring. Added institution + notes fields to `AddAccountDialog`/`EditAccountDialog`, threaded
+  through `FinanceRepository.addAccount`/`updateAccount` (new optional params) and the DAO's
+  `updateDetails` query, and surfaced them on `AccountCard`. Account-type breadth (the mega-prompt
+  lists cash/current/savings/wallet/foreign-currency/brokerage-cash/other as an enum) was **not**
+  addressed — accounts still use a free-text `accountType` string with the add dialog hardcoding
+  `"OTHER"`; deferred as a UI-only follow-up, not attempted this pass.
+- **2D Categories/tax separation.** Verified, not changed: `FinancialEventEntity.category` (a
+  free-text spending category) and `TaxItemEntity.taxEventType`/`reviewState` (the tax
+  interpretation) are already separate entities/columns with no coupling — the non-negotiable rule
+  already holds. No fix needed.
+- **2B/2C/2E/2F/2G/2I** (transaction fields, money-activity filtering, asset/liability/receivable
+  field completeness beyond what 2J/2H touched, goals UI) were **not** picked up this phase —
+  explicitly deprioritized per this phase's own scope order once 2J/2H/2A took the available time.
+
+Tests added: `FinancialPositionTest` (JVM, deterministic net-worth fixture including a partial
+investment sale and a mixed asset/liability/receivable position, plus an empty-portfolio zero
+case) and three new `AppDatabaseTest` cases (account institution/notes persistence, investment
+account-label non-hardcoding, and the canonical `financialPosition` Flow combining accounts +
+wealth + monthly activity end-to-end).
+
+Verification: `./gradlew test lint` PASS; `./gradlew assembleDebugAndroidTest assembleDebug` PASS
+(compiles only; no device this session).
