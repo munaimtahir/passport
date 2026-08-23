@@ -61,7 +61,7 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 7 — Reports/export/backup/calendar | DONE (scoped) | `3d43066` | An earlier attempt at this phase was interrupted by a session limit mid-work; this run picked up its verified-compiling partial diff and finished it — see detail below |
 | 8 — UX/accessibility/security/release hardening | DONE (scoped) | `261fcf3` | An earlier attempt at this phase stalled mid-work; this run verified and finished its uncommitted partial diff — see detail below |
 | 9 — Implementation freeze/clone-ready handoff | DONE | `e41309b` | See detail below |
-| 10 — Deferred device qualification | IN PROGRESS (API 26 done) | `f99c999`, `03144b8`, `a0d4296`, `fae1c79` | Real emulators (`Android_26_Test`/API 26, `Android_16_Test`/API 36) turned out to be present in this environment; proceeding directly rather than waiting for a separate clone. API 26 connected suite now 43/43 green; API 36 pass and the rest of Phase 10 (E2E walkthrough, backup equivalence, accessibility, performance, notifications) still to come — see detail below |
+| 10 — Deferred device qualification | IN PROGRESS (both connected-test passes + crash-scans done) | `f99c999`, `03144b8`, `a0d4296`, `fae1c79`, `008b6dc`, `4cdaf14` | Real emulators (`Android_26_Test`/API 26, `Android_16_Test`/API 36) turned out to be present in this environment; proceeding directly rather than waiting for a separate clone. Connected suite: **43/43 PASS on both API 26 and API 36**; crash-scan smoke (install/launch, no FATAL EXCEPTION): clean on both. Remaining: manual E2E walkthrough, full backup-equivalence proof, accessibility/adaptive, performance (synthetic dataset), notification-delivery, physical-device smoke — see detail below |
 
 This table is updated at the end of every phase in this remediation run.
 
@@ -656,23 +656,67 @@ device-environment flakiness — closed as follows:
 confirmed on a second clean run. Full host-side gate (`./gradlew test lint assembleDebug`) also
 re-verified green after these changes (no regression from the orchestrator/build-config change).
 
-### Crash-scan smoke
+### Crash-scan smoke — API 26
 
-Not yet performed this pass (time went into diagnosing/fixing the connected-suite regressions
-above, which was the highest-value work). Deferred to the next Phase 10 step, immediately
-following this ledger update, in the same session.
+Performed in a later step (below, same day): `adb install -r app-debug.apk` → force-stop → clear
+logcat → `monkey -c android.intent.category.LAUNCHER 1` → 6s settle → grep for `FATAL EXCEPTION`.
+**Result: none found.** Clean install/launch on API 26.
 
 ### Backup equivalence gate (mega-prompt 10D)
 
 Not yet attempted — no `DemoUserScenario` seed data exists (Phase 1 deferred it, documented in
-`docs/DEVICE_QUALIFICATION_HANDOFF.md`), and this pass's time went entirely into getting the
-connected suite to a genuinely green baseline first, which is a prerequisite for trusting any
-manual walkthrough evidence gathered afterward. Remains open for a subsequent Phase 10 pass.
+`docs/DEVICE_QUALIFICATION_HANDOFF.md`). `BackupRestoreDeviceTest.populatedBackupRestoresEncrypted
+DocumentAndLinkGraph` passed on both API 26 and API 36 as part of the connected suite (a
+repository-level round trip with populated documents/links/hashes), which is partial evidence, but
+a full UI-driven backup→clear→restore proof with device-entered fixture data was not additionally
+performed. Remains open for a subsequent Phase 10 pass.
 
-### Not yet run this phase
+## Phase 10 detail — API 36 (`Android_16_Test`)
 
-API 36 (`Android_16_Test`) connected suite; manual E2E workflow; accessibility/adaptive
-(TalkBack, font scale, landscape/tablet); process/lifecycle (background/relock/process-death);
-performance (synthetic large dataset — also blocked on no seed data existing); notifications;
-physical-device smoke (no physical device available in this environment, remains open
-regardless).
+Same emulator serial (`emulator-5554`) reused for both API levels sequentially (API 26 shut down
+via `adb emu kill` before booting API 36, and again after API 36's work before rebooting API 26
+briefly for its crash-scan).
+
+### Connected instrumentation suite
+
+**First run: 43 tests, 42 passed, 1 failed** (a large improvement over API 26's initial 37/43,
+since the API-26 fixes above — Test Orchestrator, tag-based field targeting, the tax-year FK fix —
+already carried over). The one new, API-36-specific failure:
+
+- **`MoneyCaptureDeviceTest`, `RecurringDraftDeviceTest`, `WealthCaptureDeviceTest`** all failed
+  with "No compose hierarchies found in the app" (or downstream assertion failures caused by it).
+  Root cause: on API 33+, `MainActivity` requests `POST_NOTIFICATIONS` immediately after
+  `setContent`; without pre-granting it, the system permission dialog steals window focus from the
+  just-created Compose hierarchy. `NavigationSmokeTest` already had a `GrantPermissionRule`-based
+  workaround for this from Phase 1 — the three newer test classes never got it. Added the same
+  rule to all three. (`4cdaf14`)
+
+**Second run: 43 tests, 42 passed, 1 failed** (different failure) — `MoneyCaptureDeviceTest.account
+AndSalaryCapturePersistThroughUi` failed at its final assertion (`'Salary device acceptance' ...
+is not displayed!`). Root cause: `assertVisible()` (used for the income-event assertion) did a
+single scroll-then-assert with no retry, while the sibling `scrollToAndAssertVisible()` (added in
+the API 26 pass for the account-creation assertion, same underlying fire-and-forget-write race)
+already retried. The single-shot version happened to be fine on API 26 but flaked on the slower
+API 36 emulator. Fixed by unifying both call sites onto the retry-based implementation and
+removing the now-redundant duplicate helper. (`4cdaf14`)
+
+**Third run: 43/43 PASS**, confirmed clean. `./gradlew test lint` re-verified green after these
+changes (no host-side regression).
+
+### Crash-scan smoke — API 36
+
+Same procedure as API 26 above. **Result: none found.** Clean install/launch on API 36.
+
+### Not yet run, either API level
+
+Manual E2E workflow (beyond what the automated suite already exercises); a full UI-driven backup
+equivalence proof (see above); accessibility/adaptive (TalkBack, font scale, landscape/tablet);
+process/lifecycle (background/relock/process-death — note the automated suite does exercise
+`rememberSaveable` indirectly via Activity recreation between test classes, but not a deliberate
+rotation/process-death scenario); performance (synthetic large dataset — blocked on no seed data
+existing, same gap as the backup-equivalence walkthrough); notifications (delivery, not just
+permission-granting); physical-device smoke (no physical device available in this environment,
+remains open regardless of any emulator work).
+
+Both emulators are shut down (confirmed via `adb devices` returning no attached device) — nothing
+was left running.
