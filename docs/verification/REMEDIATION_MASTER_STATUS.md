@@ -59,7 +59,7 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 5 — Annual workspace/reconciliation | DONE (scoped) | `c4ce66f` | See detail below |
 | 6 — Vault/records/evidence lifecycle | DONE (scoped) | `863eebd` | See detail below |
 | 7 — Reports/export/backup/calendar | DONE (scoped) | `3d43066` | An earlier attempt at this phase was interrupted by a session limit mid-work; this run picked up its verified-compiling partial diff and finished it — see detail below |
-| 8 — UX/accessibility/security/release hardening | DONE (scoped) | (pending — see below) | An earlier attempt at this phase stalled mid-work; this run verified and finished its uncommitted partial diff — see detail below |
+| 8 — UX/accessibility/security/release hardening | DONE (scoped) | `261fcf3` | An earlier attempt at this phase stalled mid-work; this run verified and finished its uncommitted partial diff — see detail below |
 | 9 — Implementation freeze/clone-ready handoff | NOT STARTED | — | |
 | 10 — Deferred device qualification | NOT STARTED (explicitly deferred) | — | Requires emulator/device environment |
 
