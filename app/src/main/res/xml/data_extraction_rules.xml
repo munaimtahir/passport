@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Vexel Finance Passport is offline-first and provides its own explicit, user-initiated,
+  password-encrypted portable backup (see core.security.BackupPackageService). It must never
+  rely on or silently permit the OS to move unencrypted app data (the Room database, Vault
+  document bytes, or local preferences) off-device via cloud backup or device-to-device
+  transfer, so both channels are fully excluded here.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+    </device-transfer>
+</data-extraction-rules>

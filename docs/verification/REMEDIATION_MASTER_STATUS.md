@@ -32,7 +32,7 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 0 Foundation | PARTIAL | Phase 0 | VERIFIED — HOST | Build/unit/lint green; install/launch/device gate deferred to Phase 10 |
 | 1 Design/nav/onboarding | PARTIAL | Phase 1 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Onboarding flow (`Onboarding.kt`), global privacy masking (`AppPreferences`, `LocalPrivacyMode`), and a reusable `DateField` landed this phase; see Phase 1 log row for what remains |
 | 2 Local data | PARTIAL | Phase 1/2 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Schema v8 migrations verified by JVM test; income/expense/transfer forms now use `DateField` instead of a silent `LocalDate.now()` default; most other historical-date entry points remain for Phase 2 |
-| 3 Security | PARTIAL | Phase 8 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | PIN/biometric/Keystore exist; full lifecycle/device evidence deferred |
+| 3 Security | PARTIAL | Phase 8 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | PIN/biometric/Keystore exist; `FLAG_SECURE` confirmed still set before `setContent`; whole-tree grep for `Log.`/`println`/`print(` found zero sensitive-logging hits; `android:dataExtractionRules`/`fullBackupContent` now explicitly exclude all app data from OS-level cloud/device-transfer backup; full lifecycle/device evidence still deferred |
 | 4 Money | PARTIAL | Phase 2 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Account institution/notes metadata now captured; canonical liquid-funds calc added (`FinancialPosition`) |
 | 5 Wealth | PARTIAL | Phase 2 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Valuation/disposal/repayment/partial-receipt dialogs were already UI-wired (audit predates this); investment holdings summary and non-hardcoded account label added this phase |
 | 6 Home | ~~BROKEN~~ FIXED | Phase 3 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Home now shows canonical `FinancialPosition.netWorthMinor` with an assets/liabilities/liquid-funds/investments/receivables breakdown, correctly labeled; the old movement figure is relabeled "Income vs. expense this period" and never called net worth |
@@ -44,8 +44,8 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 12 Reports | PARTIAL | Phase 7 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | In-app preview dialog now precedes every PDF export; all report amounts use canonical `FinancialPosition`/grouped PKR formatting instead of raw `/100` division |
 | 13 Backup/restore | PARTIAL | Phase 7 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Manifest now records per-document SHA-256 hashes and the active ruleset version (backward-compatible parsing for older manifests lacking them); equivalence proof still needs a device (Phase 10D) |
 | 14 Calendar | PARTIAL | Phase 6/7 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED (document/official-record expiry, Phase 6) | Document/official-record expiry reminders wired in Phase 6; receivable-due-date and tax-review-deadline reminders still absent |
-| 15 UX hardening | PARTIAL | Phase 1/8 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED (masking); NOT IMPLEMENTED (a11y) | Global privacy masking landed in Phase 1; a11y/adaptive review remains Phase 8 |
-| 16 Release | PARTIAL | Phase 8/9 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Debug-signed internal QA build exists; device/physical evidence deferred |
+| 15 UX hardening | PARTIAL | Phase 1/8 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED (masking, process-recreation, empty states, icon labels); NOT IMPLEMENTED (full a11y/adaptive layout review) | Global privacy masking landed in Phase 1; Phase 8 spot-checked and found every list screen already has an empty state and every `Icon(` already has a real `contentDescription` (no fix needed); converted ~26 dialog `remember`→`rememberSaveable` occurrences for process recreation, deliberately excepting the backup/restore password field (security reason, documented inline); full a11y/adaptive-layout review still needs a device (Phase 8B/8C/8E, deferred to Phase 10) |
+| 16 Release | PARTIAL | Phase 8/9 | IMPLEMENTED — HOST VERIFIED (build config); DEVICE VERIFICATION DEFERRED (install/launch) | `minSdk`/`compileSdk`/`targetSdk` (26/36/36), R8 minification, and manifest component exposure (only the launcher activity exported) all verified correct; `./gradlew bundleRelease` PASS this phase with the existing debug-signed internal QA config; device/physical evidence deferred |
 
 ## Phase execution log
 
@@ -59,7 +59,7 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 5 — Annual workspace/reconciliation | DONE (scoped) | `c4ce66f` | See detail below |
 | 6 — Vault/records/evidence lifecycle | DONE (scoped) | `863eebd` | See detail below |
 | 7 — Reports/export/backup/calendar | DONE (scoped) | `3d43066` | An earlier attempt at this phase was interrupted by a session limit mid-work; this run picked up its verified-compiling partial diff and finished it — see detail below |
-| 8 — UX/accessibility/security/release hardening | NOT STARTED | — | |
+| 8 — UX/accessibility/security/release hardening | DONE (scoped) | (pending — see below) | An earlier attempt at this phase stalled mid-work; this run verified and finished its uncommitted partial diff — see detail below |
 | 9 — Implementation freeze/clone-ready handoff | NOT STARTED | — | |
 | 10 — Deferred device qualification | NOT STARTED (explicitly deferred) | — | Requires emulator/device environment |
 
@@ -503,3 +503,60 @@ mirrors the existing 8→9 migration test pattern.
 Verification: `./gradlew test lint` PASS; `./gradlew assembleDebug` PASS; `./gradlew
 assembleDebugAndroidTest` PASS (compiles only, not run — no device this session). New Room schema
 version: **10**.
+
+## Phase 8 detail
+
+**Note on provenance:** a first attempt at this phase stalled mid-work (no progress for 600s) after
+making the `AndroidManifest.xml`/`data_extraction_rules.xml`/`backup_rules.xml` change and most of
+the `remember`→`rememberSaveable` conversions in `PassportApp.kt`, but before running any
+verification or committing. This run read that diff, confirmed it compiled, found and closed two
+gaps it left, then ran the full gate and committed.
+
+**8F Security hardening review — explicit finding: nothing sensitive found.** Grepped all of
+`app/src/main` for `Log.`, `println`, `print(` — zero matches anywhere in the codebase, so there is
+no PIN/key/CNIC/NTN/account-number/document-content/amount logging to fix. Confirmed
+`MainActivity.onCreate` still sets `FLAG_SECURE` before `setContent`. This is a real, checked
+finding, not a skipped step.
+
+**8G Modern backup/extraction rules** (from the stalled attempt, verified correct): `AndroidManifest.xml`
+now declares `android:dataExtractionRules`/`android:fullBackupContent`, both excluding all app data
+(`domain="root"`) from cloud backup and device-transfer — the app's own encrypted portable backup
+remains the only backup path; the OS is never allowed to move unencrypted data off-device.
+
+**8D Process recreation** (from the stalled attempt, extended): ~25 dialog fields across
+`PassportApp.kt` were converted `remember`→`rememberSaveable`. This run found and converted one more
+(`backupPassword`, a simple show/hide boolean in `MoreDialog`) and deliberately left one **unconverted**:
+`BackupPasswordDialog`'s `password` field. A plaintext backup/restore password must not be written
+into the saved-instance-state `Bundle`, which Android can persist across process death — losing it on
+rotation/process death is the intended, safer behavior, and this is now documented inline as a comment
+so a future pass doesn't "fix" it into a regression. `expanded` (dropdown open/close state in
+`AccountPicker`) was checked and correctly left as `remember` — it's transient UI state, not user input.
+
+**8C accessibility, light pass:** every `Icon(...)` call in `PassportApp.kt` already had a real,
+specific `contentDescription` — no fix needed.
+
+**8A UX states, light pass:** every list screen checked (reminders, official records, tax issues,
+assets, liabilities, investments, receivables, goals, vault documents including the "no search match"
+case) already has an empty-state message — no fix needed.
+
+**8I Build configuration:** confirmed `minSdk=26`/`compileSdk=36`/`targetSdk=36`, R8 minification
+(`isMinifyEnabled = true`) with `proguardFiles` configured, and that `AndroidManifest.xml` exports
+only `MainActivity` (the launcher) — no other component is exported. Nothing needed fixing here;
+production signing remains untouched/deferred per `docs/BLOCKERS.md`.
+
+**Deferred (documented, not faked):** 8B (adaptive/expanded-width layout) and a full 8C/8E
+(accessibility/performance) review — both require actual device rendering to verify meaningfully
+and are explicitly Phase 10's job, not a code-only pass. Clipboard restriction on PIN/sensitive-identifier
+fields was considered per the mega-prompt's 8F guidance and not implemented: Compose `OutlinedTextField`
+has no first-class "disable copy" affordance, and forcing one would be an awkward workaround for a
+low-severity, PIN-only-not-persisted-data risk — left as a known, reported gap rather than a silent
+skip.
+
+**Tests:** none added — every fix this phase was a manifest/XML/gradle-config change or a Compose
+state-persistence-strategy change, neither of which has meaningful unit-testable behavior; verified
+by successful build instead, per this phase's own instructions.
+
+**Verification:** `./gradlew test lint` PASS (3m13s); `./gradlew assembleDebug assembleDebugAndroidTest`
+PASS (43s, mostly cached); `./gradlew bundleRelease` PASS (3m55s, R8 minification + existing
+debug-signed internal QA signing config) — this is the first phase in this run to build the actual
+release bundle. No Room migration; schema stays at version 10.

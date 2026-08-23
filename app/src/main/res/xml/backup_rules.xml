@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Legacy (pre-Android-12) full-backup configuration. android:allowBackup is already "false" so
+  this has no practical effect below API 31 either, but it is kept explicit and in sync with
+  data_extraction_rules.xml (excluding all app data) as a safety net in case allowBackup is ever
+  changed without this file being revisited.
+-->
+<full-backup-content>
+    <exclude domain="root" />
+</full-backup-content>
