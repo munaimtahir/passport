@@ -707,7 +707,7 @@ changes (no host-side regression).
 
 Same procedure as API 26 above. **Result: none found.** Clean install/launch on API 36.
 
-### Not yet run, either API level
+### Not yet run, either API level (as of the end of the 2026-08-23 API 26/36 pass)
 
 Manual E2E workflow (beyond what the automated suite already exercises); a full UI-driven backup
 equivalence proof (see above); accessibility/adaptive (TalkBack, font scale, landscape/tablet);
@@ -719,4 +719,112 @@ permission-granting); physical-device smoke (no physical device available in thi
 remains open regardless of any emulator work).
 
 Both emulators are shut down (confirmed via `adb devices` returning no attached device) — nothing
-was left running.
+was left running. All of the above is closed out in the 2026-08-24 continuation below.
+
+## Phase 10 detail — 2026-08-24 device-qualification completion
+
+Resumed after a prior session was interrupted mid-work. Two emulators used this pass:
+`Android_26_Test` (API 26, `emulator-5556`) as the primary driver, `Android_15_Test` (API 35,
+`emulator-5554`) for accessibility spot checks and a bonus crash-scan. Per the user's explicit
+2026-08-23 instruction, emulator evidence is accepted in place of a physical device for this
+qualification — see the closed row in `docs/BLOCKERS.md`.
+
+**Already landed before this continuation** (separate commits, same day): manual E2E walkthrough
+(`ManualE2EWalkthroughDeviceTest`), UI-driven backup/restore equivalence proof
+(`UiDrivenBackupRestoreDeviceTest`), synthetic-dataset performance check
+(`SyntheticDatasetPerformanceDeviceTest` — 2,000 financial events + 500 tax items inserted into a
+real on-disk Room database; list load and annual-draft generation both stayed well under the
+5s/15s ceilings the test asserts, though the exact numbers weren't captured to this ledger by that
+pass and the host was under heavy concurrent load from other Gradle/emulator processes at the
+time, so treat any absolute timing as a responsiveness floor, not a clean-hardware benchmark).
+
+**Device-lifecycle items (new `SecurityLifecycleDeviceTest`, API 26), closing 3 previously-unscoped
+mega-prompt items and finding 2 real bugs along the way:**
+
+- **`deleteAllData` → onboarding, without a process kill.** Flagged as unverified since Phase 1.
+  Confirmed the suspected bug: `Context.getSharedPreferences` caches one in-memory instance per
+  file per process; `deleteAllData`'s raw `File(dataDir, "shared_prefs").delete()` never touched
+  the already-constructed `AppPreferences`/`PinStore` instances the running app was holding, so a
+  post-delete `isOnboardingComplete()` check kept returning the stale pre-delete value. **Fixed:**
+  added `AppPreferences.clear()`/`PinStore.clear()` (through the live instance, not the file) and
+  switched `deleteAllData` to call those. Also found `OnboardingGate`'s `complete` flag used
+  `rememberSaveable`, which would have survived the `Activity#recreate()` this fix depends on and
+  kept showing the stale value even after the preference fix; switched to plain `remember` since
+  `AppPreferences` is already the durable source of truth. `MainViewModel.deleteAllData` now takes
+  an `onComplete` callback so the delete confirmation dialog can call `activity.recreate()` once
+  the async delete genuinely finishes.
+- **Inactivity/backgrounding relock.** Confirmed `SecurityGate` already relocks on every `ON_STOP`
+  (stricter than a timed window) — added a real device test driving background/foreground via
+  `ActivityScenario` state changes and re-authenticating.
+- **Rotation/process-death for the Phase 8 `rememberSaveable` conversions.** A deliberate
+  `Activity#recreate()` proof — the connected suite only exercised this incidentally via Activity
+  teardown between test classes before now. Confirmed `recreate()` also correctly relocks the app
+  first (`SecurityGate`'s `unlocked` is intentionally non-saveable, by design) before the dialog's
+  saved field content restores underneath it.
+- **Real, unrelated bug this test surfaced:** the "More" dialog's button list (9+ report-preview
+  buttons plus export/backup/delete) was not wrapped in a scrollable container, so "Delete all
+  application data" was unreachable off-screen on realistic device heights — not a test artifact,
+  a genuine UI defect a real user would hit. Fixed with a bounded, scrollable `Column`.
+- **Deep-link lock enforcement — documented, not tested.** `AndroidManifest.xml` declares exactly
+  one intent-filter on `MainActivity`, category `LAUNCHER` only. No deep links of any kind exist in
+  this app to bypass the lock screen through; there is nothing to write a test against.
+- **Biometric cancel-does-not-unlock — documented, not tested; genuinely unverifiable here.** Both
+  attached emulators declare `android.hardware.fingerprint` as a `PackageManager` feature, but
+  neither resolves an `android.settings.FINGERPRINT_ENROLL` intent (no Settings fingerprint
+  enrollment activity in these system images) and `dumpsys biometric`/`fingerprint` report no
+  enrolled biometric. `BiometricManager#canAuthenticate` therefore never returns
+  `BIOMETRIC_SUCCESS` on this hardware, so `SecurityGate`'s "Use biometrics" button never renders
+  and `BiometricPrompt`'s cancel path is unreachable in this environment. By code inspection,
+  `SecurityGate.kt`'s `AuthenticationCallback` only overrides `onAuthenticationSucceeded` — there
+  is no `onAuthenticationError`/`onAuthenticationFailed` override, so the default no-op-on-cancel
+  behavior is correct (unlocked stays false), but this was confirmed by reading the code, not by
+  driving a live `BiometricPrompt` interaction.
+
+Verified: 50/50 `connectedDebugAndroidTest` on API 26 (full suite, not just the new classes),
+`./gradlew test lint` green.
+
+**Notification delivery (new `NotificationDeliveryDeviceTest`, API 26).** Prior phases only
+confirmed `POST_NOTIFICATIONS` was grantable (the API 36 focus-steal fix, `GrantPermissionRule`
+workarounds) — never that a notification actually reaches the system tray. This schedules a real
+`ReminderScheduler` work request with zero delay through the production `WorkManager` instance and
+polls the real `NotificationManager.getActiveNotifications()` for the resulting notification by
+its computed id. Passed as part of the same 50-test full-suite run above.
+
+**Accessibility/adaptive spot checks (API 35, `Android_15_Test` — this system image has Google
+apps including TalkBack; the API 26 image does not, confirmed by `pm list packages | grep
+talkback` returning nothing on API 26 vs. `com.google.android.marvin.talkback` present on API 35).
+Manual, screenshot-based — not automated, no test file added.**
+
+- **TalkBack.** Enabled via `settings put secure enabled_accessibility_services
+  com.google.android.marvin.talkback/...TalkBackService` + `accessibility_enabled 1`. Confirmed
+  actually engaging (not just "on" in settings): screenshots of both the PIN/unlock screen and the
+  onboarding welcome screen show TalkBack's green accessibility-focus outline around the correct
+  text elements ("Unlock your local financial records.", "Welcome to Vexel Finance Passport").
+  Raw `uiautomator dump` accessibility-tree inspection of the PIN screen found every visible
+  interactive element has adjacent accessible text (the PIN field's own "PIN" label, the Unlock
+  button's "Unlock" text) — no completely unlabeled controls. One structural note, not a
+  confirmed defect: the Unlock button's actual clickable node (`android.view.View`) does not carry
+  its own text/content-desc directly — the "Unlock" text lives on a separate sibling `TextView`
+  rather than being merged onto the clickable node itself. Android's accessibility framework
+  commonly falls back to reading nearby/descendant text for such cases and this matches the
+  pattern already verified for icons in Phase 8, but it wasn't independently confirmed via
+  captured TalkBack speech output (not feasible over adb) — flagged here for a follow-up review
+  rather than silently passed over.
+- **Font scale 1.3x** (`settings put system font_scale 1.3`, app relaunched to pick it up).
+  Screenshotted both the PIN/unlock screen and the onboarding welcome screen: text wraps to
+  additional lines correctly, no clipped or overlapping content, "Unlock"/"Next" buttons remain
+  fully visible and tappable. The onboarding title wraps close to the container's right padding
+  edge at this scale but reading the source confirms `OnboardingFlow`'s `Column` unconditionally
+  applies `Modifier.padding(28.dp)` on all sides — the tight wrap is genuine word-wrap behavior at
+  a larger font, not text overflowing its container.
+- **Landscape rotation** (`settings put system accelerometer_rotation 0` +
+  `user_rotation 1`). Screenshotted the onboarding welcome screen: title, body text, and the
+  "Next" button all reflow correctly with no clipping or overlap in the wider, shorter viewport.
+- **Not covered this pass:** tablet/expanded-width layout (no tablet-class AVD available in this
+  environment) and any screen beyond onboarding/PIN at non-default font scale or in landscape
+  (the flow was blocked mid-check by an incorrect-PIN lockout from stale app state left by an
+  earlier connected-test run on this same emulator; `pm clear` was used to reset before continuing
+  the checks that are recorded above, so a full walkthrough of Money/Wealth/Tax screens at 1.3x
+  font scale or in landscape was not additionally captured this pass).
+- Emulator state (font scale, rotation, TalkBack) was reset to defaults and the app's data cleared
+  before this pass ended.
