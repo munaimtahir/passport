@@ -11,3 +11,4 @@ app/release/
 docs/verification/*.log
 *.jks
 *.keystore
+keystore.properties

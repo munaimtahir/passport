@@ -5,7 +5,7 @@
 | Date | Sprint | Decision/blocker | Temporary assumption | Affects | Required before |
 | --- | --- | --- | --- | --- | --- |
 | 2026-08-14 | 0 | Original repository history was unavailable | Preserve the working tree and use a new local Git history | Commit provenance only | Not required for local QA |
-| 2026-08-14 | 16 | Permanent release signing key is not provided | Use debug and locally verifiable unsigned/configured release artifacts | Production publishing | Production release |
+| ~~2026-08-14~~ 2026-08-23 | 16 | ~~Permanent release signing key is not provided~~ **RESOLVED**: real `vexel-release` keystore generated, wired into `app/build.gradle.kts`, `bundleRelease`/`assembleRelease` verified signed with it | See `docs/RELEASE_SIGNING.md` for fingerprints, verification evidence, and the required offline-backup + Play App Signing enrollment follow-up | Production publishing | N/A — closed |
 | 2026-08-14 | 16 | Final branding/icon and public privacy-policy URL are not provided | Use internal-safe `ic_passport` branding and draft policy content | Store publication | Production release |
 | 2026-08-17 | 16 | No physical Android device is exposed through ADB; only API 26 emulator was connected | Record emulator evidence and leave physical-device gate open | Final internal QA matrix | Before internal release verdict |
 

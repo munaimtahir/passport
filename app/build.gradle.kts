@@ -1,3 +1,6 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -5,6 +8,17 @@ plugins {
 }
 
 apply(plugin = "org.jetbrains.kotlin.kapt")
+
+// Real release signing key. keystore.properties and the .jks file it points to are both
+// gitignored and never committed — see keystore.properties.example for the expected shape.
+// Falls back to debug signing when the properties file is absent (e.g. a fresh clone before
+// the keystore is provisioned) so the project still builds out of the box.
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        FileInputStream(keystorePropertiesFile).use { load(it) }
+    }
+}
 
 android {
     namespace = "pk.vexel.financepassport"
@@ -32,11 +46,27 @@ android {
         execution = "ANDROIDX_TEST_ORCHESTRATOR"
     }
 
+    signingConfigs {
+        if (keystorePropertiesFile.exists()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
-            // Internal QA only. Replace with the external production signing key before publishing.
-            signingConfig = signingConfigs.getByName("debug")
+            // Real release key when keystore.properties is present (see above); otherwise falls
+            // back to debug signing so the project still builds on a fresh clone.
+            signingConfig = if (keystorePropertiesFile.exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
