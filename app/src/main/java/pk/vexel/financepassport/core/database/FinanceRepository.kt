@@ -316,7 +316,12 @@ class FinanceRepository(private val db: AppDatabase) {
 
     fun toDomain(entity: FinancialEventEntity) = FinancialEvent(entity.id, runCatching { FinancialEventType.valueOf(entity.eventType) }.getOrDefault(FinancialEventType.ADJUSTMENT), Money(MinorUnits(kotlin.math.abs(entity.amountMinor)), entity.currency), entity.accountId, entity.dateEpochDay, entity.description)
 
-    suspend fun exportSnapshot() = ExportSnapshot(db.accountDao().getAll(), db.financialEventDao().getAll(), db.wealthDao().getAllAssets(), db.wealthDao().getAllLiabilities(), db.taxItemDao().getAll(), db.documentDao().getAll(), db.investmentDao().getAll(), db.receivableDao().getAll(), db.goalDao().getAll(), db.officialRecordDao().getAll(), db.budgetDao().getAll())
+    suspend fun exportSnapshot() = ExportSnapshot(
+        db.accountDao().getAll(), db.financialEventDao().getAll(), db.wealthDao().getAllAssets(), db.wealthDao().getAllLiabilities(),
+        db.taxItemDao().getAll(), db.documentDao().getAll(), db.investmentDao().getAll(), db.receivableDao().getAll(),
+        db.goalDao().getAll(), db.officialRecordDao().getAll(), db.budgetDao().getAll(),
+        db.taxMappingDao().getAll(), db.wealthSnapshotDao().getAll(), db.taxDraftDao().getAll(),
+    )
 
     suspend fun deleteAllData(context: Context) {
         db.withTransaction { db.clearAllTables() }
@@ -454,12 +459,13 @@ class FinanceRepository(private val db: AppDatabase) {
             Files.copy(File(sqlite.path ?: error("Database path is unavailable")).toPath(), snapshotFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
         }
         require(snapshotFile.isFile) { "The local database snapshot is not available" }
-        val documents = db.documentDao().getAll().map { document ->
+        val allDocuments = db.documentDao().getAll()
+        val documents = allDocuments.map { document ->
             BackupFile("documents/${File(document.localEncryptedPath).name}", File(document.localEncryptedPath).readBytes())
         }
         val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size
         return try {
-            BackupPackageService().create(snapshotFile.readBytes(), documents, BuildConfig.VERSION_NAME, 10, password, recordCount).payload
+            BackupPackageService().create(snapshotFile.readBytes(), documents, BuildConfig.VERSION_NAME, 10, password, recordCount, allDocuments.map { it.sha256 }, runCatching { pk.vexel.financepassport.core.taxrules.BundledTaxRulesets.loadDefault().version }.getOrNull()).payload
         } finally {
             snapshotFile.delete()
         }

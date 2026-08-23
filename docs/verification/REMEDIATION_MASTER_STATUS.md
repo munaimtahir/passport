@@ -41,9 +41,9 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 9 Rules engine | PARTIAL | Phase 4 | IMPLEMENTED — HOST VERIFIED | Ruleset is now JSON (`taxrules/pk-structural-1.json`), parsed/validated by `TaxRulesetLoader` with typed `RulesetError`s; taxonomy already covered all 24 mega-prompt event types, confirmed not extended; only one ruleset version exists (multi-version history is architecturally supported, not yet exercised) |
 | 10 Annual workspace | PARTIAL | Phase 5 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Draft generation now takes a selected tax year (not just "now"); draft versioning confirmed by test (regeneration increments version, keeps prior version's lines intact); draft-line → source-tax-item drill-down already existed and is unchanged; draft-line → `TaxMappingEntity` lineage walk still not wired (would need a UI drill-down screen, out of this phase's scope) |
 | 11 Reconciliation | PARTIAL | Phase 5 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Fixed a real bug: opening wealth was hardcoded to zero and reconciliation summed *all* financial events ever, not just the tax year's. Now requires a persisted `WealthSnapshotEntity` (Phase 5D, new) opening snapshot and scopes income/expenditure to the tax year's date range; UI drill-down into individual contributing records still absent |
-| 12 Reports | PARTIAL | Phase 7 | NOT IMPLEMENTED (preview/full catalog) | Export-only; no in-app preview; raw `/100` formatting |
-| 13 Backup/restore | PARTIAL | Phase 7 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Crypto/staging done; equivalence proof needs device (Phase 10D) |
-| 14 Calendar | PARTIAL | Phase 7 | NOT IMPLEMENTED (expiry/due-date wiring) | Generic reminders exist; document/receivable/tax-review linkage absent |
+| 12 Reports | PARTIAL | Phase 7 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | In-app preview dialog now precedes every PDF export; all report amounts use canonical `FinancialPosition`/grouped PKR formatting instead of raw `/100` division |
+| 13 Backup/restore | PARTIAL | Phase 7 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Manifest now records per-document SHA-256 hashes and the active ruleset version (backward-compatible parsing for older manifests lacking them); equivalence proof still needs a device (Phase 10D) |
+| 14 Calendar | PARTIAL | Phase 6/7 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED (document/official-record expiry, Phase 6) | Document/official-record expiry reminders wired in Phase 6; receivable-due-date and tax-review-deadline reminders still absent |
 | 15 UX hardening | PARTIAL | Phase 1/8 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED (masking); NOT IMPLEMENTED (a11y) | Global privacy masking landed in Phase 1; a11y/adaptive review remains Phase 8 |
 | 16 Release | PARTIAL | Phase 8/9 | IMPLEMENTED — DEVICE VERIFICATION DEFERRED | Debug-signed internal QA build exists; device/physical evidence deferred |
 
@@ -58,12 +58,74 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 4 — Versioned tax capture engine | DONE (scoped) | `be260e0` | See detail below |
 | 5 — Annual workspace/reconciliation | DONE (scoped) | `c4ce66f` | See detail below |
 | 6 — Vault/records/evidence lifecycle | DONE (scoped) | `863eebd` | See detail below |
-| 7 — Reports/export/backup/calendar | NOT STARTED | — | |
+| 7 — Reports/export/backup/calendar | DONE (scoped) | (pending — see below) | An earlier attempt at this phase was interrupted by a session limit mid-work; this run picked up its verified-compiling partial diff and finished it — see detail below |
 | 8 — UX/accessibility/security/release hardening | NOT STARTED | — | |
 | 9 — Implementation freeze/clone-ready handoff | NOT STARTED | — | |
 | 10 — Deferred device qualification | NOT STARTED (explicitly deferred) | — | Requires emulator/device environment |
 
 This table is updated at the end of every phase in this remediation run.
+
+## Phase 7 detail
+
+**Provenance note:** an earlier attempt at this phase was interrupted mid-work by a session usage
+limit, leaving three files (`BackupPackage.kt`, `FinanceRepository.kt`, `Reports.kt`) modified but
+uncommitted, with no tests and no ledger update. That partial diff was verified to compile
+(`./gradlew compileDebugKotlin` PASS) before this pass built on it — it was not redone. What it had
+already landed: `BackupManifest` gained `documentHashes`/`rulesetVersion` fields (serialized and
+parsed in `manifestJson()`/`restore()`, backward-compatible with older manifests lacking them);
+`FinanceRepository`'s backup-creation path now supplies real document hashes and the active ruleset
+version; and `Reports.kt` gained a `canonicalPosition(snapshot)` helper (reusing Phase 2's
+`calculateFinancialPosition`) used by `netWorth()`/`investmentSummary()`, plus a `pkr()` formatting
+helper replacing every raw `minor / 100` division across the report catalog.
+
+**Landed this pass, in priority order:**
+
+- **7C in-app report preview — the top-priority item, not yet done by the interrupted attempt.**
+  `MoreDialog` in `PassportApp.kt` no longer sends every report straight to a SAF PDF picker.
+  Each report button now generates the `FinancialReport` first and shows it (title, generated-at
+  timestamp, and every line, in a scrollable dialog) with "Export as PDF" / "Close" actions; PDF
+  export only happens if the user confirms from the preview. All nine report types (net worth,
+  annual summary, and the seven catalog reports) go through this preview step.
+- **Formatting fix, verified complete.** Grepped `Reports.kt` for any remaining `/ 100` or raw
+  `PKR $x` string interpolation the interrupted attempt might have missed — found none;
+  `annualFinancialSummary` and `evidenceChecklist` (which don't format currency directly) needed no
+  change, and every other function already used `pkr()`.
+- **7G JSON export completeness — a real, confirmed gap, now closed.** `ExportSnapshot` and
+  `DataExportService.json()` predated `TaxMappingEntity`/`WealthSnapshotEntity` (Phase 4/5) and the
+  `TaxAnnualDraftEntity.draftVersion` field — none of the three were in the structured export at
+  all. Added `taxMappings`/`wealthSnapshots`/`taxDrafts` fields to `ExportSnapshot` (defaulted to
+  `emptyList()` so existing call sites/tests didn't need updating), added the missing `getAll()`
+  queries to `TaxMappingDao`/`WealthSnapshotDao`/`TaxDraftDao` (none existed — only per-item/
+  per-year/`Flow`-based queries did), wired `FinanceRepository.exportSnapshot()` to populate them,
+  and extended `DataExportService.json()` to serialize each list.
+- **7K delete-all — confirmed, not changed.** `deleteAllData` calls `db.clearAllTables()`, which
+  Room generates to cover every table in the *current* schema automatically — `tax_mappings` and
+  `wealth_snapshots` need no special-casing. `WorkManager.cancelAllWork()` cancels all work
+  unconditionally, so Phase 6's `document-expiry-$id`/`official-record-expiry-$id` unique work
+  requests are covered without any ID-specific logic. No code change was needed for this item; it
+  was a verification-only check.
+
+**Deferred (documented here, not faked):** CSV export for report types beyond financial events
+(only `csvEvents`/`csvAccounts`/`csvTaxItems` exist); "streaming vs. full-buffer" backup read
+improvements beyond what already existed; a second, independent backup/restore device round-trip
+proof (that's explicitly Phase 10D's job, not host-testable). No Room migration was needed for this
+phase — schema stays at version 10.
+
+**Tests added:**
+- `ReportsTest.netWorthReportMatchesCanonicalFinancialPositionIndependently` (a report's net worth
+  equals a directly-computed `calculateFinancialPosition` result for the same fixture, and
+  `canonicalPosition()` itself is `equals` to that independent computation) and
+  `reportAmountsUseGroupedPkrFormattingNotRawDivision` (asserts `"PKR 1,234,567"` grouped output
+  appears and the raw-division form does not).
+- `BackupPackageTest.manifestRoundTripsDocumentHashesAndRulesetVersion` and
+  `manifestParsingToleratesLegacyPackagesMissingHashOrRulesetFieldsEntirely` (hand-builds a
+  package whose `manifest.json` has the pre-Phase-7 shape — the two new keys entirely absent, not
+  just empty — to prove `restore()` doesn't require them).
+- `DataExportTest.jsonExportIncludesTaxMappingWealthSnapshotAndDraftLineage`.
+
+**Verification:** `./gradlew test lint` PASS (all new tests green); `./gradlew assembleDebug` PASS;
+`./gradlew assembleDebugAndroidTest` PASS (no androidTest sources were touched this phase, so this
+is unchanged from Phase 6's state — reconfirmed anyway). No device available this session.
 
 ## Phase 6 detail
 

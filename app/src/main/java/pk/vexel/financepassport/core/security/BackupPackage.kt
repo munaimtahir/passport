@@ -11,14 +11,30 @@ import java.util.zip.ZipOutputStream
 
 data class BackupFile(val path: String, val bytes: ByteArray)
 data class BackupDiskFile(val path: String, val file: File)
-data class BackupManifest(val appVersion: String, val schemaVersion: Int, val createdAtEpochMillis: Long, val recordCount: Int, val documentCount: Int)
+
+/**
+ * [documentHashes] is the SHA-256 of every document included in the backup (in [BackupDiskFile]/
+ * [BackupFile] order), so a restore can verify each document's bytes arrived intact without
+ * needing to inspect the encrypted payload first. [rulesetVersion] records which tax ruleset
+ * version was active when the backup was created, so a restored draft's provenance is inspectable
+ * from the manifest alone.
+ */
+data class BackupManifest(
+    val appVersion: String,
+    val schemaVersion: Int,
+    val createdAtEpochMillis: Long,
+    val recordCount: Int,
+    val documentCount: Int,
+    val documentHashes: List<String> = emptyList(),
+    val rulesetVersion: String? = null,
+)
 data class BackupPackage(val manifest: BackupManifest, val payload: ByteArray)
 
 class BackupPackageService(private val crypto: PortableBackupCrypto = PortableBackupCrypto()) {
-    fun createStreaming(database: File, documents: List<BackupDiskFile>, appVersion: String, schemaVersion: Int, password: CharArray, recordCount: Int, output: File): BackupManifest {
+    fun createStreaming(database: File, documents: List<BackupDiskFile>, appVersion: String, schemaVersion: Int, password: CharArray, recordCount: Int, output: File, documentHashes: List<String> = emptyList(), rulesetVersion: String? = null): BackupManifest {
         require(database.isFile) { "Database snapshot is missing" }
         require(recordCount >= 0) { "Record count cannot be negative" }
-        val manifest = BackupManifest(appVersion, schemaVersion, Instant.now().toEpochMilli(), recordCount, documents.size)
+        val manifest = BackupManifest(appVersion, schemaVersion, Instant.now().toEpochMilli(), recordCount, documents.size, documentHashes, rulesetVersion)
         val manifestJson = manifestJson(manifest).toByteArray(StandardCharsets.UTF_8)
         output.parentFile?.mkdirs()
         try {
@@ -53,9 +69,9 @@ class BackupPackageService(private val crypto: PortableBackupCrypto = PortableBa
         override fun close() { pipe.close(); writer.close(); database.close() }
     }
 
-    fun create(database: ByteArray, documents: List<BackupFile>, appVersion: String, schemaVersion: Int, password: CharArray, recordCount: Int = database.size): BackupPackage {
+    fun create(database: ByteArray, documents: List<BackupFile>, appVersion: String, schemaVersion: Int, password: CharArray, recordCount: Int = database.size, documentHashes: List<String> = emptyList(), rulesetVersion: String? = null): BackupPackage {
         require(recordCount >= 0) { "Record count cannot be negative" }
-        val manifest = BackupManifest(appVersion, schemaVersion, Instant.now().toEpochMilli(), recordCount, documents.size)
+        val manifest = BackupManifest(appVersion, schemaVersion, Instant.now().toEpochMilli(), recordCount, documents.size, documentHashes, rulesetVersion)
         val manifestJson = manifestJson(manifest)
         val plain = ByteArrayOutputStream().also { output -> ZipOutputStream(output).use { zip ->
             zip.putNextEntry(ZipEntry("manifest.json")); zip.write(manifestJson.toByteArray(StandardCharsets.UTF_8)); zip.closeEntry()
@@ -65,7 +81,12 @@ class BackupPackageService(private val crypto: PortableBackupCrypto = PortableBa
         return BackupPackage(manifest, crypto.encrypt(plain, password).bytes)
     }
 
-    private fun manifestJson(manifest: BackupManifest) = "{\"appVersion\":\"${manifest.appVersion}\",\"schemaVersion\":${manifest.schemaVersion},\"createdAtEpochMillis\":${manifest.createdAtEpochMillis},\"recordCount\":${manifest.recordCount},\"documentCount\":${manifest.documentCount}}"
+    private fun manifestJson(manifest: BackupManifest): String {
+        val hashesJson = manifest.documentHashes.joinToString(",", "[", "]") { "\"$it\"" }
+        val rulesetJson = manifest.rulesetVersion?.let { "\"$it\"" } ?: "null"
+        return "{\"appVersion\":\"${manifest.appVersion}\",\"schemaVersion\":${manifest.schemaVersion},\"createdAtEpochMillis\":${manifest.createdAtEpochMillis}," +
+            "\"recordCount\":${manifest.recordCount},\"documentCount\":${manifest.documentCount},\"documentHashes\":$hashesJson,\"rulesetVersion\":$rulesetJson}"
+    }
 
     fun restore(packageBytes: ByteArray, password: CharArray, stagingDirectory: File): BackupManifest {
         val decrypted = crypto.decrypt(BackupEnvelope(packageBytes), password)
@@ -87,7 +108,12 @@ class BackupPackageService(private val crypto: PortableBackupCrypto = PortableBa
         fun number(name: String) = Regex("\\\"$name\\\"\\s*:\\s*(\\d+)").find(manifestBytes.decodeToString())?.groupValues?.get(1)
         fun int(name: String) = number(name)?.toIntOrNull() ?: 0
         fun long(name: String) = number(name)?.toLongOrNull() ?: 0L
-        val appVersion = Regex("\\\"appVersion\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"").find(manifestBytes.decodeToString())?.groupValues?.get(1) ?: "restored"
-        return BackupManifest(appVersion, int("schemaVersion"), long("createdAtEpochMillis"), int("recordCount"), int("documentCount"))
+        val manifestText = manifestBytes.decodeToString()
+        val appVersion = Regex("\\\"appVersion\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"").find(manifestText)?.groupValues?.get(1) ?: "restored"
+        val documentHashes = Regex("\\\"documentHashes\\\"\\s*:\\s*\\[([^\\]]*)]").find(manifestText)?.groupValues?.get(1)
+            ?.let { body -> Regex("\\\"([^\\\"]*)\\\"").findAll(body).map { it.groupValues[1] }.toList() }
+            ?: emptyList()
+        val rulesetVersion = Regex("\\\"rulesetVersion\\\"\\s*:\\s*\\\"([^\\\"]*)\\\"").find(manifestText)?.groupValues?.get(1)
+        return BackupManifest(appVersion, int("schemaVersion"), long("createdAtEpochMillis"), int("recordCount"), int("documentCount"), documentHashes, rulesetVersion)
     }
 }

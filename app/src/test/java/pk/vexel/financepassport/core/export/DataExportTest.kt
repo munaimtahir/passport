@@ -3,6 +3,9 @@ package pk.vexel.financepassport.core.export
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import pk.vexel.financepassport.core.database.FinancialEventEntity
+import pk.vexel.financepassport.core.database.TaxAnnualDraftEntity
+import pk.vexel.financepassport.core.database.TaxMappingEntity
+import pk.vexel.financepassport.core.database.WealthSnapshotEntity
 
 class DataExportTest {
     @Test fun jsonAndCsvContainCanonicalEventFields() {
@@ -10,5 +13,21 @@ class DataExportTest {
         val service = DataExportService()
         assertTrue(service.json(snapshot).contains("financialEvents"))
         assertTrue(service.csvEvents(snapshot).contains("\"Salary, June\""))
+    }
+
+    @Test fun jsonExportIncludesTaxMappingWealthSnapshotAndDraftLineage() {
+        val snapshot = ExportSnapshot(
+            emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList(),
+            taxMappings = listOf(TaxMappingEntity("map1", "item1", "pk-structural-1", "OTHER_INCOME", "S1", "C1", "SYSTEM_GENERATED", null, null, 1)),
+            wealthSnapshots = listOf(WealthSnapshotEntity("snap1", "year1", "OPENING", 1, 100, 200, 300, 400, -50, 750, 1)),
+            taxDrafts = listOf(TaxAnnualDraftEntity("draft1", "year1", 2, "pk-structural-1", 1, "OPEN", 0)),
+        )
+        val json = DataExportService().json(snapshot)
+        assertTrue(json.contains("\"taxMappings\""))
+        assertTrue(json.contains("\"map1\""))
+        assertTrue(json.contains("\"wealthSnapshots\""))
+        assertTrue(json.contains("\"snap1\""))
+        assertTrue(json.contains("\"taxDrafts\""))
+        assertTrue(json.contains("\"draftVersion\":2"))
     }
 }

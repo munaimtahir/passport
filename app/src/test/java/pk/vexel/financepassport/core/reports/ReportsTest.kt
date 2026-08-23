@@ -3,16 +3,39 @@ package pk.vexel.financepassport.core.reports
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import pk.vexel.financepassport.core.database.AccountEntity
 import pk.vexel.financepassport.core.database.AssetEntity
 import pk.vexel.financepassport.core.database.FinancialEventEntity
 import pk.vexel.financepassport.core.database.InvestmentEventEntity
 import pk.vexel.financepassport.core.database.TaxItemEntity
 import pk.vexel.financepassport.core.export.ExportSnapshot
+import pk.vexel.financepassport.core.model.calculateFinancialPosition
 
 class ReportsTest {
     @Test fun netWorthReportUsesCanonicalAssetsAndLiabilities() {
         val snapshot = ExportSnapshot(emptyList(), emptyList(), listOf(AssetEntity("a", "OTHER", "Car", 1, 10000, 12000, "PKR", 100, null, null, "ACTIVE")), emptyList(), emptyList(), emptyList())
         assertTrue(ReportGenerator().netWorth(snapshot, "now").lines.any { it.contains("Net worth: PKR 120") })
+    }
+
+    @Test fun netWorthReportMatchesCanonicalFinancialPositionIndependently() {
+        val account = AccountEntity("acc", "Bank", null, "SAVINGS", null, null, "PKR", 500_00, 1, "ACTIVE", null, 1, 1)
+        val income = FinancialEventEntity("in", "INCOME", 10, 1_000_00, "PKR", "acc", null, "Salary", null, "UNKNOWN", null, 1, 1)
+        val asset = AssetEntity("a", "OTHER", "Car", 1, 10_000_00, 12_000_00, "PKR", 100, null, null, "ACTIVE")
+        val snapshot = ExportSnapshot(listOf(account), listOf(income), listOf(asset), emptyList(), emptyList(), emptyList())
+
+        val expected = calculateFinancialPosition(account.openingBalanceMinor, income.amountMinor, snapshot.assets, snapshot.liabilities, snapshot.investments, snapshot.receivables, income.amountMinor, 0L)
+        val report = ReportGenerator().netWorth(snapshot, "now")
+
+        assertTrue(report.lines.any { it == "Net worth: PKR ${"%,d".format(expected.netWorthMinor / 100)}" })
+        assertEquals(expected, ReportGenerator().canonicalPosition(snapshot))
+    }
+
+    @Test fun reportAmountsUseGroupedPkrFormattingNotRawDivision() {
+        val asset = AssetEntity("a", "OTHER", "Property", 1, 1_000_000_00, 1_234_567_00, "PKR", 100, null, null, "ACTIVE")
+        val snapshot = ExportSnapshot(emptyList(), emptyList(), listOf(asset), emptyList(), emptyList(), emptyList())
+        val report = ReportGenerator().assetStatement(snapshot, "now")
+        assertTrue(report.lines.any { it.contains("PKR 1,234,567") })
+        assertTrue(report.lines.none { it.contains("123456700") })
     }
 
     @Test fun reportCatalogProducesTraceableSections() {

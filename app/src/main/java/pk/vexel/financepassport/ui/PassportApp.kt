@@ -12,9 +12,12 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalanceWallet
 import androidx.compose.material.icons.filled.Add
@@ -138,6 +141,8 @@ private fun MoreDialog(vm: MainViewModel, application: PassportApplication, onDi
     var status by remember { mutableStateOf<String?>(null) }
     var requestedReport by remember { mutableStateOf("NET_WORTH") }
     var currentYearOnly by remember { mutableStateOf(false) }
+    var previewReport by remember { mutableStateOf<pk.vexel.financepassport.core.reports.FinancialReport?>(null) }
+    var pendingReportExport by remember { mutableStateOf<(() -> Unit)?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     suspend fun reportSnapshot() = application.repository.exportSnapshot().let { snapshot ->
         if (!currentYearOnly) snapshot else {
@@ -152,7 +157,7 @@ private fun MoreDialog(vm: MainViewModel, application: PassportApplication, onDi
     val csvExporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri -> if (uri != null) scope.launch { application.contentResolver.openOutputStream(uri)?.use { it.write(pk.vexel.financepassport.core.export.DataExportService().csvEvents(application.repository.exportSnapshot()).toByteArray()) } } }
     val backupSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri -> val file = pendingBackup; if (uri != null && file != null) scope.launch { application.contentResolver.openOutputStream(uri)?.use { destination -> file.inputStream().use { it.copyTo(destination) } }; file.delete(); status = "Encrypted backup exported" }; pendingBackup = null }
     val backupPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) scope.launch { restorePayload = application.contentResolver.openInputStream(uri)?.use { it.readBytes() } } }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("More") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Reports and local data controls"); status?.let { Text(it, color = MaterialTheme.colorScheme.primary) }; OutlinedButton(onClick = { currentYearOnly = !currentYearOnly }, modifier = Modifier.fillMaxWidth()) { Text(if (currentYearOnly) "Report range: current tax year" else "Report range: all recorded dates") }; Button(onClick = { exporter.launch("vexel-finance-passport-export.json") }, modifier = Modifier.fillMaxWidth()) { Text("Export structured JSON") }; Button(onClick = { pdfExporter.launch("vexel-net-worth.pdf") }, modifier = Modifier.fillMaxWidth()) { Text("Export net-worth PDF") }; Button(onClick = { annualPdfExporter.launch("vexel-annual-financial-summary.pdf") }, modifier = Modifier.fillMaxWidth()) { Text("Export annual summary PDF") }; listOf("ASSETS" to "Asset statement PDF", "LIABILITIES" to "Liability statement PDF", "CASH_FLOW" to "Cash-flow summary PDF", "INVESTMENTS" to "Investment summary PDF", "RECEIVABLES" to "Receivables report PDF", "TAX" to "Tax preparation summary PDF", "EVIDENCE" to "Evidence checklist PDF").forEach { (kind, label) -> Button(onClick = { requestedReport = kind; catalogPdfExporter.launch("vexel-${kind.lowercase()}-report.pdf") }, modifier = Modifier.fillMaxWidth()) { Text(label) } }; Button(onClick = { csvExporter.launch("vexel-financial-events.csv") }, modifier = Modifier.fillMaxWidth()) { Text("Export financial events CSV") }; Button(onClick = { backupPassword = true }, modifier = Modifier.fillMaxWidth()) { Text("Create encrypted backup") }; Button(onClick = { backupPicker.launch(arrayOf("application/octet-stream", "application/zip", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) { Text("Restore encrypted backup") }; Button(onClick = { confirmDelete = true }, modifier = Modifier.fillMaxWidth()) { Text("Delete all application data") } } }, confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("More") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Reports and local data controls"); status?.let { Text(it, color = MaterialTheme.colorScheme.primary) }; OutlinedButton(onClick = { currentYearOnly = !currentYearOnly }, modifier = Modifier.fillMaxWidth()) { Text(if (currentYearOnly) "Report range: current tax year" else "Report range: all recorded dates") }; Button(onClick = { exporter.launch("vexel-finance-passport-export.json") }, modifier = Modifier.fillMaxWidth()) { Text("Export structured JSON") }; Button(onClick = { scope.launch { previewReport = pk.vexel.financepassport.core.reports.ReportGenerator().netWorth(reportSnapshot(), java.time.Instant.now().toString()); pendingReportExport = { pdfExporter.launch("vexel-net-worth.pdf") } } }, modifier = Modifier.fillMaxWidth()) { Text("Preview net-worth report") }; Button(onClick = { scope.launch { previewReport = pk.vexel.financepassport.core.reports.ReportGenerator().annualFinancialSummary(reportSnapshot(), java.time.Instant.now().toString()); pendingReportExport = { annualPdfExporter.launch("vexel-annual-financial-summary.pdf") } } }, modifier = Modifier.fillMaxWidth()) { Text("Preview annual summary report") }; listOf("ASSETS" to "Asset statement", "LIABILITIES" to "Liability statement", "CASH_FLOW" to "Cash-flow summary", "INVESTMENTS" to "Investment summary", "RECEIVABLES" to "Receivables report", "TAX" to "Tax preparation summary", "EVIDENCE" to "Evidence checklist").forEach { (kind, label) -> Button(onClick = { requestedReport = kind; scope.launch { val snapshot = reportSnapshot(); val stamp = java.time.Instant.now().toString(); val generator = pk.vexel.financepassport.core.reports.ReportGenerator(); val report = when (kind) { "ASSETS" -> generator.assetStatement(snapshot, stamp); "LIABILITIES" -> generator.liabilityStatement(snapshot, stamp); "CASH_FLOW" -> generator.cashFlowSummary(snapshot, stamp); "INVESTMENTS" -> generator.investmentSummary(snapshot, stamp); "RECEIVABLES" -> generator.receivablesReport(snapshot, stamp); "TAX" -> generator.taxPreparationSummary(snapshot, stamp); "EVIDENCE" -> generator.evidenceChecklist(snapshot, stamp); else -> generator.netWorth(snapshot, stamp) }; previewReport = report; pendingReportExport = { requestedReport = kind; catalogPdfExporter.launch("vexel-${kind.lowercase()}-report.pdf") } } }, modifier = Modifier.fillMaxWidth()) { Text("Preview $label") } }; Button(onClick = { csvExporter.launch("vexel-financial-events.csv") }, modifier = Modifier.fillMaxWidth()) { Text("Export financial events CSV") }; Button(onClick = { backupPassword = true }, modifier = Modifier.fillMaxWidth()) { Text("Create encrypted backup") }; Button(onClick = { backupPicker.launch(arrayOf("application/octet-stream", "application/zip", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) { Text("Restore encrypted backup") }; Button(onClick = { confirmDelete = true }, modifier = Modifier.fillMaxWidth()) { Text("Delete all application data") } } }, confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } })
     if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false; deleteConfirmation = "" }, title = { Text("Delete everything?") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("This permanently removes local records, encrypted vault files, preferences, and scheduled work. It cannot be undone."); OutlinedTextField(deleteConfirmation, { deleteConfirmation = it }, label = { Text("Type DELETE to confirm") }, singleLine = true) } }, confirmButton = { Button(onClick = { vm.deleteAllData(application); confirmDelete = false; deleteConfirmation = ""; onDismiss() }, enabled = deleteConfirmation == "DELETE") { Text("Delete all") } }, dismissButton = { TextButton(onClick = { confirmDelete = false; deleteConfirmation = "" }) { Text("Cancel") } })
     if (backupPassword) BackupPasswordDialog("Create encrypted backup", onDismiss = { backupPassword = false }) { password ->
         backupPassword = false
@@ -161,6 +166,20 @@ private fun MoreDialog(vm: MainViewModel, application: PassportApplication, onDi
     restorePayload?.let { payload -> BackupPasswordDialog("Restore encrypted backup", onDismiss = { restorePayload = null }) { password ->
         scope.launch { runCatching { LiveRestoreService(application).restore(payload, password.toCharArray()) }.onSuccess { status = "Restore complete. Close and relaunch the app to reopen restored records." }.onFailure { status = "Restore failed: ${it.message}" }; restorePayload = null }
     } }
+    previewReport?.let { report ->
+        AlertDialog(
+            onDismissRequest = { previewReport = null; pendingReportExport = null },
+            title = { Text(report.title) },
+            text = {
+                Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Generated ${report.generatedAt}", style = MaterialTheme.typography.labelSmall)
+                    report.lines.forEach { line -> Text(line, style = MaterialTheme.typography.bodyMedium) }
+                }
+            },
+            confirmButton = { Button(onClick = { pendingReportExport?.invoke(); previewReport = null; pendingReportExport = null }) { Text("Export as PDF") } },
+            dismissButton = { TextButton(onClick = { previewReport = null; pendingReportExport = null }) { Text("Close") } },
+        )
+    }
 }
 
 @Composable

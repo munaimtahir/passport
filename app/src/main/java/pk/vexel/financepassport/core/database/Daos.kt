@@ -157,6 +157,9 @@ interface WealthSnapshotDao {
 
     @Query("SELECT * FROM wealth_snapshots WHERE taxYearId = :taxYearId ORDER BY kind")
     fun observeForYear(taxYearId: String): Flow<List<WealthSnapshotEntity>>
+
+    @Query("SELECT * FROM wealth_snapshots ORDER BY taxYearId, kind")
+    suspend fun getAll(): List<WealthSnapshotEntity>
 }
 
 @Dao
@@ -296,6 +299,9 @@ interface TaxMappingDao {
 
     @Query("UPDATE tax_mappings SET supersededByMappingId = :supersededByMappingId WHERE id = :id")
     suspend fun markSuperseded(id: String, supersededByMappingId: String)
+
+    @Query("SELECT * FROM tax_mappings ORDER BY createdAtEpochMillis")
+    suspend fun getAll(): List<TaxMappingEntity>
 }
 
 @Dao
@@ -314,6 +320,9 @@ interface TaxDraftDao {
 
     @Query("SELECT * FROM tax_draft_lines WHERE draftId = :draftId ORDER BY sectionCode, categoryCode")
     suspend fun getLines(draftId: String): List<TaxDraftLineEntity>
+
+    @Query("SELECT * FROM tax_annual_drafts ORDER BY generatedAtEpochMillis DESC")
+    suspend fun getAll(): List<TaxAnnualDraftEntity>
 }
 
 @Dao
