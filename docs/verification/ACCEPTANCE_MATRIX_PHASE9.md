@@ -10,6 +10,17 @@ behavior; every row that ultimately needs a rendered UI, a real biometric prompt
 notification, or a real file picker is marked **DEVICE REQUIRED** regardless of how complete the
 underlying code is — that determination is Phase 10's job, not this one's.
 
+**Update, Phase 10 (2026-08-23/24):** device/emulator work has since happened — the full connected
+androidTest suite now runs and passes on real API 26/35/36 emulators (see
+`docs/verification/REMEDIATION_MASTER_STATUS.md`'s Phase 10 sections), so every `(compiled, not
+run)` annotation below describing an androidTest class that IS part of that suite is now stale —
+those classes have actually run and passed on-device, not merely compiled. This file is not being
+re-audited row-by-row against that result (that would duplicate the ledger); the rows below are
+only hand-updated where Phase 10 added new, specific coverage (AT-081, AT-082, AT-101, AT-102,
+AT-111). For every other IMPLEMENTED-DEVICE-REQUIRED row whose "Auto test" column names a class
+that exists under `app/src/androidTest`, treat "(compiled, not run)" as "compiled AND run,
+passing" per the Phase 10 connected-suite results, not as still-open.
+
 Legend: **Impl.** = implementation path. **Auto test** = JVM/androidTest name if one exists
 ("(compiled, not run)" for androidTest since no device is available this session). **Device
 action needed** = what Phase 10 must actually do. **Status** = HOST-VERIFIED / IMPLEMENTED-DEVICE-REQUIRED / NOT IMPLEMENTED.
@@ -99,8 +110,8 @@ action needed** = what Phase 10 must actually do. **Status** = HOST-VERIFIED / I
 | AT | Impl. | Auto test | Device action needed | Status |
 |---|---|---|---|---|
 | AT-080 | PIN verifier with backoff | `PinVerifierTest` | Enter wrong PIN via UI | HOST-VERIFIED (logic); IMPLEMENTED-DEVICE-REQUIRED (UI) |
-| AT-081 | `BiometricPrompt` integration in `SecurityGate.kt` — cancel path unchanged this run | — | Cancel biometric prompt, confirm no unlock | IMPLEMENTED-DEVICE-REQUIRED |
-| AT-082 | Lifecycle-based relock observer — unchanged this run | — | Background app past inactivity threshold, confirm relock | IMPLEMENTED-DEVICE-REQUIRED |
+| AT-081 | `BiometricPrompt` integration in `SecurityGate.kt` — by code inspection, only `onAuthenticationSucceeded` is overridden, so cancel/failure correctly no-ops (stays locked) | — | Cancel biometric prompt, confirm no unlock | IMPLEMENTED-DEVICE-REQUIRED — genuinely unverifiable in this environment: both attached emulators declare fingerprint hardware but resolve no enrollment activity and report no enrolled biometric, so `BiometricManager` never returns `BIOMETRIC_SUCCESS` and the "Use biometrics" button never renders |
+| AT-082 | Lifecycle-based relock observer (`SecurityGate`'s `ON_STOP` handler) | `SecurityLifecycleDeviceTest.backgroundingTheAppRelocksIt` | Background app, confirm relock | DEVICE-VERIFIED (Phase 10, API 26) |
 | AT-083 | No deep links are declared in the manifest beyond the launcher — nothing to bypass currently exists, so there is nothing for this test to catch a regression in yet | — | Confirm no intent-filter exists that could reach protected content directly | IMPLEMENTED-DEVICE-REQUIRED (trivially, by absence) |
 | AT-084 | `OfficialRecordEntity` masked/encrypted identifier, revealed only explicitly | — | Confirm masking via UI | IMPLEMENTED-DEVICE-REQUIRED |
 | AT-085 | `LocalPrivacyMode`/`MaskedPkr` (Phase 1), applied across Home/Money/Wealth/Reports | — | Toggle privacy mode via UI | IMPLEMENTED-DEVICE-REQUIRED |
@@ -122,21 +133,24 @@ action needed** = what Phase 10 must actually do. **Status** = HOST-VERIFIED / I
 | AT | Impl. | Auto test | Device action needed | Status |
 |---|---|---|---|---|
 | AT-100 | `DataExportService.json()`, extended in Phase 7 to include `TaxMappingEntity`/`WealthSnapshotEntity`/draft version | `DataExportTest` | Export via UI | HOST-VERIFIED (content); IMPLEMENTED-DEVICE-REQUIRED (SAF export) |
-| AT-101 | `FinanceRepository.deleteAllData` — `clearAllTables()`, vault/cache file deletion, WorkManager cancellation, `shared_prefs` deletion | — (no JVM-level fixture test exists for this exact method; it's exercised indirectly by DB-layer tests, not as a populated-then-cleared end-to-end assertion) | Populate data, delete all, confirm empty on device | IMPLEMENTED-DEVICE-REQUIRED (no dedicated automated test — a real gap, noted for Phase 10) |
-| AT-102 | `AppPreferences.isOnboardingComplete()` is stored in the same `shared_prefs` directory `deleteAllData` wipes; whether an already-constructed `AppPreferences`/`MainViewModel` instance actually re-reads it without a process restart was flagged as an open question in Phase 1 and never independently re-verified | `AppPreferencesTest` (compiled, not run — tests the preference store in isolation, not the delete-all interaction) | Delete all on a device, confirm onboarding reappears without a manual process kill | NOT IMPLEMENTED (verified) — genuinely open, flag explicitly for Phase 10 |
+| AT-101 | `FinanceRepository.deleteAllData` — `clearAllTables()`, vault/cache file deletion, WorkManager cancellation, and (Phase 10 fix) `AppPreferences.clear()`/`PinStore.clear()` through the live SharedPreferences instances instead of raw file deletion | `SecurityLifecycleDeviceTest.deleteAllDataReturnsToOnboardingWithoutProcessKill` | Populate data, delete all, confirm empty on device | DEVICE-VERIFIED (Phase 10, API 26) |
+| AT-102 | Phase 10 found and fixed a real bug here: the raw `shared_prefs` file deletion never updated the already-constructed `AppPreferences` instance's in-memory cache (`Context.getSharedPreferences` caches one instance per file per process), and `OnboardingGate`'s `complete` flag used `rememberSaveable`, which would have survived the `Activity#recreate()` the fix depends on. Fixed both; `deleteAllData` now takes an `onComplete` callback and the delete-confirmation dialog calls `activity.recreate()` | `SecurityLifecycleDeviceTest.deleteAllDataReturnsToOnboardingWithoutProcessKill` | Delete all on a device, confirm onboarding reappears without a manual process kill | DEVICE-VERIFIED (Phase 10, API 26) — was genuinely broken since Phase 1, now fixed and proven |
 
 ## Notifications
 | AT | Impl. | Auto test | Device action needed | Status |
 |---|---|---|---|---|
 | AT-110 | `CalendarItemDialog`/`ReminderScheduler`; Phase 6 added document/official-record expiry-driven reminders using the same pattern | `ReminderSchedulerTest`, `ReminderDeviceTest` (compiled, not run) | Create reminder via UI | HOST-VERIFIED (scheduling logic); IMPLEMENTED-DEVICE-REQUIRED (real notification) |
-| AT-111 | `ReminderWorker` fires and posts to the `passport_reminders` channel | `ReminderDeviceTest` (compiled, not run) | Confirm real notification fires on a device | IMPLEMENTED-DEVICE-REQUIRED |
+| AT-111 | `ReminderWorker` fires and posts to the `passport_reminders` channel | `ReminderDeviceTest`, `NotificationDeliveryDeviceTest` (schedules a real zero-delay work request and polls `NotificationManager.getActiveNotifications()` for the actual posted notification, not just permission state) | Confirm real notification fires on a device | DEVICE-VERIFIED (Phase 10, API 26) |
 | AT-112 | `RescheduleDialog`/`rescheduleCalendarItem` | `ReminderSchedulerTest` | Edit reminder via UI | HOST-VERIFIED (logic); IMPLEMENTED-DEVICE-REQUIRED (UI) |
 | AT-113 | Calendar item status update to CANCELLED cancels the underlying unique WorkManager request | `ReminderSchedulerTest` | Delete/cancel reminder via UI | HOST-VERIFIED (logic); IMPLEMENTED-DEVICE-REQUIRED (UI) |
 
 ## Summary
 
 - **HOST-VERIFIED** (calculation/domain logic proven by a passing JVM test, independent of any UI): AT-015, AT-027, AT-031, AT-034, AT-036, AT-040, AT-041, AT-045, AT-046, AT-050, AT-051, AT-070, AT-072, AT-074, AT-080, AT-086, AT-090, AT-091, AT-092, AT-093, AT-094, AT-096, AT-097, AT-100, AT-110, AT-112, AT-113.
-- **IMPLEMENTED-DEVICE-REQUIRED**: the large majority — real code exists, but the acceptance test as written requires an actual rendered UI, biometric prompt, notification, or file picker to pass, none of which were exercised this run.
-- **NOT IMPLEMENTED**: AT-003 (no guided setup step exists to skip), AT-016 (no Money activity filter UI), AT-042/AT-052 (no source/contributor drill-down screens), AT-073 (no automated long-document pagination coverage), AT-101 (no dedicated automated delete-all fixture test), AT-102 (delete-all → onboarding re-entry genuinely unverified, flagged since Phase 1).
+- **DEVICE-VERIFIED** (Phase 10, real emulator run — not just compiled): AT-082, AT-101, AT-102, AT-111, plus (per the Phase 10 update note above) every other row whose named androidTest class is part of the connected suite that now passes 43-50/43-50 on API 26/35/36 — treat those as run, not merely compiled, even where the row text below still says "(compiled, not run)".
+- **IMPLEMENTED-DEVICE-REQUIRED**: real code exists but genuinely not device-verified — either not yet exercised by an automated test (most SAF/file-picker and visual-only rows) or, for AT-081 specifically, confirmed *unverifiable in this environment* (fingerprint hardware declared but not enrollable on either attached emulator).
+- **NOT IMPLEMENTED**: AT-003 (no guided setup step exists to skip), AT-016 (no Money activity filter UI), AT-042/AT-052 (no source/contributor drill-down screens), AT-073 (no automated long-document pagination coverage).
 
-No AT-### is marked PASS in this document. Phase 10 is required before any can be.
+AT-101/AT-102 were the two flagged-since-Phase-1 open questions; both are now closed with a real
+device test, and AT-102 specifically was found to be a genuine bug (not just unverified) and fixed
+in Phase 10 — see `docs/verification/REMEDIATION_MASTER_STATUS.md`.
