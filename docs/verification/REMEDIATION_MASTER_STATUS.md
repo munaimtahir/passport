@@ -60,8 +60,8 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 6 — Vault/records/evidence lifecycle | DONE (scoped) | `863eebd` | See detail below |
 | 7 — Reports/export/backup/calendar | DONE (scoped) | `3d43066` | An earlier attempt at this phase was interrupted by a session limit mid-work; this run picked up its verified-compiling partial diff and finished it — see detail below |
 | 8 — UX/accessibility/security/release hardening | DONE (scoped) | `261fcf3` | An earlier attempt at this phase stalled mid-work; this run verified and finished its uncommitted partial diff — see detail below |
-| 9 — Implementation freeze/clone-ready handoff | NOT STARTED | — | |
-| 10 — Deferred device qualification | NOT STARTED (explicitly deferred) | — | Requires emulator/device environment |
+| 9 — Implementation freeze/clone-ready handoff | DONE | (pending — see below) | See detail below |
+| 10 — Deferred device qualification | STARTING | — | Real emulators (`Android_26_Test`/API 26, `Android_16_Test`/API 36) turned out to be present in this environment; proceeding directly rather than waiting for a separate clone |
 
 This table is updated at the end of every phase in this remediation run.
 
@@ -560,3 +560,37 @@ by successful build instead, per this phase's own instructions.
 PASS (43s, mostly cached); `./gradlew bundleRelease` PASS (3m55s, R8 minification + existing
 debug-signed internal QA signing config) — this is the first phase in this run to build the actual
 release bundle. No Room migration; schema stays at version 10.
+
+## Phase 9 detail
+
+Pure verification/documentation phase, no new feature code (as scoped).
+
+**9A full host-side gate, from clean:** `./gradlew clean` (25s) → `assembleDebug` (2m38s, PASS) →
+`test` (2m4s, PASS, 132 JVM tests across debug+release, 0 failures) → `lint` (2m54s, PASS, warnings
+only) → `assembleDebugAndroidTest` (1m18s, PASS, compiles only) → `bundleRelease` (3m44s, PASS).
+Artifacts: `app-debug.apk` (sha256 `60af4a08bfeb9d178afd78b5ca94036b0d4090cc027e4e57a7e77a53d19d6b83`),
+`app-release.aab` (sha256 `af5dfd7ad80064c1d1da3b0d5c98b56667921d9df8b6b6f18ed8d64e4105d7d9`).
+
+**9B/9C:** the per-sprint table above and `docs/verification/ACCEPTANCE_MATRIX_PHASE9.md` (new,
+does not overwrite the pre-remediation `ACCEPTANCE_MATRIX.md`) carry the closure — every row is
+either HOST-VERIFIED, IMPLEMENTED-DEVICE-REQUIRED, or NOT IMPLEMENTED; nothing is marked
+device-verified since no device was used anywhere in phases 0-8.
+
+**9D:** `docs/IMPLEMENTATION_COMPLETE_DEVICE_VERIFICATION_PENDING.md` (new) — full phase-by-phase
+summary, the six real defects found and fixed during remediation, security/tax-engine/backup/
+reports summaries, and the verdict `IMPLEMENTATION COMPLETE — DEVICE QUALIFICATION PENDING`.
+
+**9E:** worktree confirmed clean after these commits; no tag created (left to the user/orchestrator
+to decide).
+
+**9F:** `docs/DEVICE_QUALIFICATION_HANDOFF.md` (new) — normally written for a future clone into an
+emulator-capable environment, but this session discovered real AVDs already present
+(`Android_26_Test`/API 26, `Android_16_Test`/API 36, `Android_15_Test`/API 35, via
+`emulator -list-avds` under `$ANDROID_HOME=/home/munaim/Android/Sdk`), so Phase 10 proceeds
+directly in this session rather than after a separate clone. The handoff doc is kept as the
+reference for exactly what Phase 10 requires and doubles as the record of what was run.
+
+**Note on provenance:** a first attempt at this phase stalled mid-work (600s, no progress) after
+producing the implementation report and acceptance matrix but before writing the device handoff
+doc or committing anything. This run verified those two files (read in full, found accurate and
+complete), wrote the handoff doc, and committed all three together.
