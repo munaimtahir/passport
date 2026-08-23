@@ -32,6 +32,7 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     val investments = repository.investments.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val receivables = repository.receivables.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val goals = repository.goals.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val goalProgress = repository.goalProgress.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val officialRecords = repository.officialRecords.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val calendarItems = repository.calendarItems.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val documents = repository.documents.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -72,7 +73,8 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     fun addInvestmentEvent(security: String, type: String, amountMinor: Long, quantityMinor: Long = 0, accountLabel: String = "Manual") = write { repository.addInvestmentEvent(security, type, amountMinor, quantityMinor, accountLabel = accountLabel) }
     fun addReceivable(title: String, counterparty: String, amountMinor: Long) = write { repository.addReceivable(title, counterparty, amountMinor) }
     fun recordReceivablePayment(id: String, amountMinor: Long) = write { repository.recordReceivablePayment(id, amountMinor) }
-    fun addGoal(title: String, targetMinor: Long) = write { repository.addGoal(title, targetMinor) }
+    fun addGoal(title: String, targetMinor: Long, goalType: String = "CUSTOM", targetDate: LocalDate? = null) = write { repository.addGoal(title, targetMinor, goalType, targetDate?.toEpochDay()) }
+    fun contributeToGoal(id: String, amountMinor: Long) = write { repository.contributeToGoal(id, amountMinor) }
     fun addOfficialRecord(context: android.content.Context, type: String, title: String, identifier: String?, issueDate: LocalDate? = null, expiryDate: LocalDate? = null) = write { repository.addOfficialRecord(context, type, title, identifier, issueDate, expiryDate) }
     fun addCalendarItem(context: android.content.Context, title: String, kind: String, delayMinutes: Long) = write { repository.addCalendarItem(context, title, kind, delayMinutes) }
     fun updateCalendarStatus(context: android.content.Context, id: String, status: String) = write { repository.updateCalendarStatus(context, id, status) }

@@ -178,8 +178,8 @@ class FinanceRepository(private val db: AppDatabase) {
         db.receivableDao().upsert(current.copy(outstandingAmountMinor = outstanding, status = if (outstanding == 0L) "SETTLED" else "OPEN"))
     }
 
-    suspend fun addGoal(title: String, targetAmountMinor: Long) {
-        db.goalDao().upsert(GoalEntity(UUID.randomUUID().toString(), title.trim(), "CUSTOM", targetAmountMinor, null, "OPEN"))
+    suspend fun addGoal(title: String, targetAmountMinor: Long, goalType: String = "CUSTOM", targetDateEpochDay: Long? = null) {
+        db.goalDao().upsert(GoalEntity(UUID.randomUUID().toString(), title.trim(), goalType, targetAmountMinor, targetDateEpochDay, "OPEN"))
     }
 
     suspend fun contributeToGoal(id: String, amountMinor: Long) {

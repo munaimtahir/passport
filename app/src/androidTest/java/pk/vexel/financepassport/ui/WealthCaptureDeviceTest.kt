@@ -64,6 +64,32 @@ class WealthCaptureDeviceTest {
         composeRule.onNodeWithText("Recorded net wealth").assertIsDisplayed()
     }
 
+    @Test
+    fun goalContributionUpdatesProgressAndAchievesAtTarget() {
+        unlockIfNeeded()
+        composeRule.onNodeWithText("Wealth", useUnmergedTree = true).performClick()
+
+        val goalName = "Device Goal ${UUID.randomUUID().toString().take(8)}"
+        composeRule.onAllNodesWithText("Add", useUnmergedTree = true)[0].performClick()
+        composeRule.onNodeWithText("GOAL", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithText("PURC", useUnmergedTree = true).performClick()
+        val goalFields = composeRule.onAllNodes(hasSetTextAction())
+        goalFields[0].performTextInput(goalName)
+        goalFields[1].performTextInput("1000")
+        composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
+        scrollToAndAssertVisible(goalName)
+
+        composeRule.onNodeWithText("Contribute", useUnmergedTree = true).performClick()
+        composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("600")
+        composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
+        scrollToAndAssertVisible("60% of target")
+
+        composeRule.onNodeWithText("Contribute", useUnmergedTree = true).performClick()
+        composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("600")
+        composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
+        scrollToAndAssertVisible("Achieved")
+    }
+
     /**
      * Every androidTest class in a connected run shares one continuous app install/database, so
      * earlier test classes may have already populated several assets/liabilities — scroll to the

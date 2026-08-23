@@ -36,6 +36,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -416,7 +417,7 @@ private fun WealthScreen(vm: MainViewModel, padding: PaddingValues) {
     val liabilities by vm.liabilities.collectAsState()
     val investments by vm.investments.collectAsState()
     val receivables by vm.receivables.collectAsState()
-    val goals by vm.goals.collectAsState()
+    val goalProgress by vm.goalProgress.collectAsState()
     var showAdd by rememberSaveable { mutableStateOf(false) }
     val assetTotal = assets.sumOf { it.currentEstimatedValueMinor }
     val liabilityTotal = liabilities.sumOf { it.outstandingAmountMinor }
@@ -424,6 +425,7 @@ private fun WealthScreen(vm: MainViewModel, padding: PaddingValues) {
     var disposalTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.AssetEntity?>(null) }
     var liabilityPaymentTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.LiabilityEntity?>(null) }
     var receivablePaymentTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.ReceivableEntity?>(null) }
+    var goalContributeTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.GoalEntity?>(null) }
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("Wealth", style = MaterialTheme.typography.headlineMedium) }
         item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text("Recorded net wealth", style = MaterialTheme.typography.labelLarge); Text(MaskedPkr(assetTotal - liabilityTotal), style = MaterialTheme.typography.headlineLarge); Text("Assets ${MaskedPkr(assetTotal)} · Liabilities ${MaskedPkr(liabilityTotal)}") } } }
@@ -450,15 +452,31 @@ private fun WealthScreen(vm: MainViewModel, padding: PaddingValues) {
         item { Text("Receivables", style = MaterialTheme.typography.titleLarge) }
         if (receivables.isEmpty()) item { Text("No receivables yet.") }
         items(receivables, key = { it.id }) { value -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(value.title, style = MaterialTheme.typography.titleMedium); Text("${value.counterparty} · outstanding ${MaskedPkr(value.outstandingAmountMinor)} of ${MaskedPkr(value.originalAmountMinor)}"); if (value.outstandingAmountMinor > 0) TextButton(onClick = { receivablePaymentTarget = value }) { Text("Record receipt") } } } }
-        item { Text("Goals", style = MaterialTheme.typography.titleLarge) }
-        if (goals.isEmpty()) item { Text("No goals yet.") }
-        items(goals, key = { it.id }) { goal -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text(goal.title, style = MaterialTheme.typography.titleMedium); Text("Target ${MaskedPkr(goal.targetAmountMinor)}") } } }
+        item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Goals", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showAdd = true }) { Text("Add") } } }
+        if (goalProgress.isEmpty()) item { Text("No goals yet.") }
+        items(goalProgress, key = { (goal, _) -> goal.id }) { (goal, progress) ->
+            Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) {
+                Text(goal.title, style = MaterialTheme.typography.titleMedium)
+                Text("${goal.goalType} · ${MaskedPkr(goal.currentAmountMinor)} of ${MaskedPkr(goal.targetAmountMinor)}")
+                LinearProgressIndicator(progress = { progress.progressPercent / 100f }, modifier = Modifier.fillMaxWidth().testTag("goal-progress-${goal.id}"))
+                Text(
+                    when {
+                        progress.isAchieved -> "Achieved"
+                        goal.targetDateEpochDay != null -> "${progress.progressPercent}% · target ${java.time.LocalDate.ofEpochDay(goal.targetDateEpochDay)} · needs ${MaskedPkr(progress.requiredMonthlySavingsMinor ?: 0)}/mo"
+                        else -> "${progress.progressPercent}% of target"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (!progress.isAchieved) TextButton(onClick = { goalContributeTarget = goal }) { Text("Contribute") }
+            } }
+        }
     }
     if (showAdd) AddWealthDialog(vm) { showAdd = false }
     valuationTarget?.let { asset -> AmountDialog("Update ${asset.title} valuation", "Current value (PKR)", onDismiss = { valuationTarget = null }) { value -> vm.updateAssetValuation(asset.id, value * 100); valuationTarget = null } }
     disposalTarget?.let { asset -> AmountDialog("Dispose ${asset.title}", "Disposal value (PKR)", onDismiss = { disposalTarget = null }) { value -> vm.disposeAsset(asset.id, value * 100); disposalTarget = null } }
     liabilityPaymentTarget?.let { liability -> AmountDialog("Repay ${liability.title}", "Payment (PKR)", onDismiss = { liabilityPaymentTarget = null }) { value -> vm.recordLiabilityPayment(liability.id, value * 100); liabilityPaymentTarget = null } }
     receivablePaymentTarget?.let { receivable -> AmountDialog("Receipt from ${receivable.counterparty}", "Received (PKR)", onDismiss = { receivablePaymentTarget = null }) { value -> vm.recordReceivablePayment(receivable.id, value * 100); receivablePaymentTarget = null } }
+    goalContributeTarget?.let { goal -> AmountDialog("Contribute to ${goal.title}", "Contribution (PKR)", onDismiss = { goalContributeTarget = null }) { value -> vm.contributeToGoal(goal.id, value * 100); goalContributeTarget = null } }
 }
 
 @Composable
@@ -470,8 +488,11 @@ private fun AddWealthDialog(vm: MainViewModel, onDismiss: () -> Unit) {
     var quantity by rememberSaveable { mutableStateOf("") }
     var investmentType by rememberSaveable { mutableStateOf("BUY") }
     var investmentAccount by rememberSaveable { mutableStateOf("") }
+    var goalType by rememberSaveable { mutableStateOf("CUSTOM") }
+    var hasTargetDate by rememberSaveable { mutableStateOf(false) }
+    var targetDate by rememberSaveable { mutableStateOf(java.time.LocalDate.now()) }
     val needsSecondary = mode == "RECEIVABLE"
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add ${mode.lowercase()}") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { listOf("ASSET", "LIABILITY", "INVESTMENT", "RECEIVABLE", "GOAL").forEach { option -> OutlinedButton(onClick = { mode = option }) { Text(option.take(4)) } } }; OutlinedTextField(title, { title = it }, label = { Text(if (mode == "INVESTMENT") "Security" else "Name") }, singleLine = true); if (mode == "INVESTMENT") { Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { listOf("BUY", "SELL", "DIVIDEND", "PROFIT", "FEE").forEach { option -> OutlinedButton(onClick = { investmentType = option }) { Text(option.take(4)) } } }; OutlinedTextField(investmentAccount, { investmentAccount = it }, label = { Text("Broker / account (optional)") }, singleLine = true); OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit) }, label = { Text("Quantity (optional)") }, singleLine = true) }; if (needsSecondary) OutlinedTextField(secondary, { secondary = it }, label = { Text("Counterparty") }, singleLine = true); OutlinedTextField(amount, { PkrMoneyInput.groupedInput(it)?.let { value -> amount = value } }, label = { Text("Amount / target (PKR)") }, singleLine = true) } }, confirmButton = { Button(onClick = { val value = PkrMoneyInput.toMinorUnits(amount, false); when (mode) { "ASSET" -> vm.addAsset(title, value); "LIABILITY" -> vm.addLiability(title, value); "INVESTMENT" -> vm.addInvestmentEvent(title, investmentType, value, quantity.toLongOrNull() ?: 0, investmentAccount.takeIf { it.isNotBlank() } ?: "Manual"); "RECEIVABLE" -> vm.addReceivable(title, secondary, value); "GOAL" -> vm.addGoal(title, value) }; onDismiss() }, enabled = title.isNotBlank() && (!needsSecondary || secondary.isNotBlank()) && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add ${mode.lowercase()}") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { listOf("ASSET", "LIABILITY", "INVESTMENT", "RECEIVABLE", "GOAL").forEach { option -> OutlinedButton(onClick = { mode = option }) { Text(option.take(4)) } } }; OutlinedTextField(title, { title = it }, label = { Text(if (mode == "INVESTMENT") "Security" else "Name") }, singleLine = true); if (mode == "INVESTMENT") { Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { listOf("BUY", "SELL", "DIVIDEND", "PROFIT", "FEE").forEach { option -> OutlinedButton(onClick = { investmentType = option }) { Text(option.take(4)) } } }; OutlinedTextField(investmentAccount, { investmentAccount = it }, label = { Text("Broker / account (optional)") }, singleLine = true); OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit) }, label = { Text("Quantity (optional)") }, singleLine = true) }; if (needsSecondary) OutlinedTextField(secondary, { secondary = it }, label = { Text("Counterparty") }, singleLine = true); if (mode == "GOAL") { Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { listOf("EMERGENCY_FUND", "PURCHASE", "DEBT_PAYOFF", "CUSTOM").forEach { option -> OutlinedButton(onClick = { goalType = option }) { Text(option.take(4)) } } } }; OutlinedTextField(amount, { PkrMoneyInput.groupedInput(it)?.let { value -> amount = value } }, label = { Text("Amount / target (PKR)") }, singleLine = true); if (mode == "GOAL") { OutlinedButton(onClick = { hasTargetDate = !hasTargetDate }) { Text(if (hasTargetDate) "Remove target date" else "Set target date") }; if (hasTargetDate) DateField("Target date", targetDate, { targetDate = it }) } } }, confirmButton = { Button(onClick = { val value = PkrMoneyInput.toMinorUnits(amount, false); when (mode) { "ASSET" -> vm.addAsset(title, value); "LIABILITY" -> vm.addLiability(title, value); "INVESTMENT" -> vm.addInvestmentEvent(title, investmentType, value, quantity.toLongOrNull() ?: 0, investmentAccount.takeIf { it.isNotBlank() } ?: "Manual"); "RECEIVABLE" -> vm.addReceivable(title, secondary, value); "GOAL" -> vm.addGoal(title, value, goalType, if (hasTargetDate) targetDate else null) }; onDismiss() }, enabled = title.isNotBlank() && (!needsSecondary || secondary.isNotBlank()) && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable
