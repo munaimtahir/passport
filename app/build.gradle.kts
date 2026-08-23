@@ -18,7 +18,18 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Each androidTest class otherwise shares one continuous app process/database for the
+        // whole connectedAndroidTest run, so an in-flight viewModelScope write cancelled by a
+        // prior test's Activity teardown can leave shared state (Room's connection pool) wedged
+        // for every test that follows. Orchestrator + clearPackageData gives every test class a
+        // fresh process and app data, matching how each test is actually written to assume it
+        // starts from a clean install.
+        testInstrumentationRunnerArguments["clearPackageData"] = "true"
         vectorDrawables.useSupportLibrary = true
+    }
+
+    testOptions {
+        execution = "ANDROIDX_TEST_ORCHESTRATOR"
     }
 
     buildTypes {
@@ -85,6 +96,7 @@ dependencies {
     androidTestImplementation("org.jetbrains.kotlinx:kotlinx-serialization-core:1.8.1")
     androidTestImplementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.8.1")
     androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestUtil("androidx.test:orchestrator:1.5.1")
 }
 
 extensions.configure<org.jetbrains.kotlin.gradle.plugin.KaptExtension>("kapt") {
