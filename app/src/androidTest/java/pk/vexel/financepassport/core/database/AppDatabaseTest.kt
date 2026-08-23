@@ -299,6 +299,41 @@ class AppDatabaseTest {
         assertEquals(2, database.taxDraftDao().observeDrafts().first().count { it.taxYearId == "PK-2026" })
     }
 
+    /**
+     * Phase 11: a tax year created under an older ruleset version must keep generating drafts
+     * under that same version even after a newer version becomes "current" — the version column
+     * on `tax_years` is the source of truth for that year, not whatever `BundledTaxRulesets`
+     * currently defaults to. Directly seeds a `tax_years` row on the older version (pre-dating
+     * this change would have created it that way) rather than relying on `ensureTaxYearExists`,
+     * which always uses the current default.
+     */
+    @Test
+    fun taxYearKeepsUsingItsOwnStoredRulesetVersionAfterANewerVersionBecomesDefault() = runBlocking {
+        database.openHelper.writableDatabase.execSQL(
+            "INSERT INTO tax_years (id, jurisdictionCode, yearLabel, startDateEpochDay, endDateEpochDay, rulesetVersion, status) VALUES ('PK-2019', 'PK', '2019', 0, 365, 'pk-structural-1', 'OPEN')",
+        )
+        val repository = FinanceRepository(database)
+        // DONATION only has a rule in pk-structural-2 — under the year's own pk-structural-1,
+        // this must come back unmapped (NO_RULE), proving v1's rules were actually used.
+        repository.addManualTaxItem("DONATION", 5_000, "Zakat receipt", java.time.LocalDate.of(2019, 6, 1))
+
+        val draft = repository.prepareAnnualDraft(2019)
+        assertEquals("Draft for a v1 tax year must record v1 as its ruleset version, not today's default", "pk-structural-1", draft.rulesetVersion)
+        assertTrue("DONATION has no rule in pk-structural-1, so this must surface as an issue, not a mapped line", draft.issueCount > 0)
+        assertTrue(repository.getDraftLines(draft.id).none { it.categoryCode == "CHARITABLE_DONATION" })
+
+        val mapping = database.taxMappingDao().getForTaxItem(database.taxItemDao().getAll().single { it.taxYearId == "PK-2019" }.id).single()
+        assertEquals("pk-structural-1", mapping.rulesetVersion)
+        assertEquals("UNMAPPED", mapping.sectionCode)
+
+        // A brand-new tax year (no pre-existing row) picks up the current default (v2), where
+        // DONATION does map — same source data, different year, genuinely different outcome.
+        repository.addManualTaxItem("DONATION", 5_000, "Zakat receipt 2027", java.time.LocalDate.of(2027, 6, 1))
+        val newDraft = repository.prepareAnnualDraft(2027)
+        assertEquals(pk.vexel.financepassport.core.taxrules.BundledTaxRulesets.CURRENT_VERSION, newDraft.rulesetVersion)
+        assertTrue(repository.getDraftLines(newDraft.id).any { it.categoryCode == "CHARITABLE_DONATION" })
+    }
+
     @Test
     fun reconciliationRequiresAnOpeningSnapshotBeforeRunning() = runBlocking {
         val repository = FinanceRepository(database)

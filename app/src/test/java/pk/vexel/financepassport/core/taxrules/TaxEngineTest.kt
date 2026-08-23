@@ -6,7 +6,7 @@ import org.junit.Test
 import pk.vexel.financepassport.core.model.Money
 
 class TaxEngineTest {
-    private val year = TaxYear("2026", "PK", "2026", 0, 1000, "pk-structural-1")
+    private val year = TaxYear("2026", "PK", "2026", 0, 1000, defaultPakistanStructuralRules().version)
 
     @Test fun sameFactsAndRulesetProduceDeterministicDraft() {
         val candidates = listOf(TaxCandidate("financial_event", "salary-1", 10, Money.pkr(1000), "Salary", TaxEventType.EMPLOYMENT_INCOME, TaxRelevance.RELEVANT))

@@ -252,12 +252,11 @@ class FinanceRepository(private val db: AppDatabase) {
         db.withTransaction {
             db.financialEventDao().upsert(event)
             if (type == FinancialEventType.INCOME) {
-                val yearId = "PK-${date.year}"
-                db.openHelper.writableDatabase.execSQL("INSERT OR IGNORE INTO tax_years (id, jurisdictionCode, yearLabel, startDateEpochDay, endDateEpochDay, rulesetVersion, status) VALUES (?, 'PK', ?, ?, ?, 'pk-structural-1', 'OPEN')", arrayOf<Any>(yearId, date.year.toString(), LocalDate.of(date.year, 1, 1).toEpochDay(), LocalDate.of(date.year, 12, 31).toEpochDay()))
+                val yearId = ensureTaxYearExists(date.year)
                 val taxItemId = UUID.randomUUID().toString()
                 val taxEventType = "EMPLOYMENT_INCOME"
                 val inserted = db.taxItemDao().insertIfAbsent(TaxItemEntity(taxItemId, yearId, "financial_event", eventId, taxEventType, date.toEpochDay(), amountMinor, null, "PKR", description.trim(), "CAPTURED", "REQUESTED", null, now, now))
-                if (inserted != -1L) recordInitialMapping(taxItemId, "financial_event", eventId, date.toEpochDay(), amountMinor, description.trim(), taxEventType, now)
+                if (inserted != -1L) recordInitialMapping(yearId, taxItemId, "financial_event", eventId, date.toEpochDay(), amountMinor, description.trim(), taxEventType, now)
             }
         }
     }
@@ -418,14 +417,13 @@ class FinanceRepository(private val db: AppDatabase) {
 
     suspend fun addManualTaxItem(type: String, amountMinor: Long, description: String, date: LocalDate = LocalDate.now()) {
         require(amountMinor > 0 && description.isNotBlank()) { "Tax item details are invalid" }
-        val yearId = "PK-${date.year}"
         val now = Instant.now().toEpochMilli()
         val taxItemId = UUID.randomUUID().toString()
         val sourceId = UUID.randomUUID().toString()
         db.withTransaction {
-            db.openHelper.writableDatabase.execSQL("INSERT OR IGNORE INTO tax_years (id, jurisdictionCode, yearLabel, startDateEpochDay, endDateEpochDay, rulesetVersion, status) VALUES (?, 'PK', ?, ?, ?, 'pk-structural-1', 'OPEN')", arrayOf<Any>(yearId, date.year.toString(), LocalDate.of(date.year, 1, 1).toEpochDay(), LocalDate.of(date.year, 12, 31).toEpochDay()))
+            val yearId = ensureTaxYearExists(date.year)
             val inserted = db.taxItemDao().insertIfAbsent(TaxItemEntity(taxItemId, yearId, "manual", sourceId, type, date.toEpochDay(), amountMinor, null, "PKR", description.trim(), "CAPTURED", "REQUESTED", null, now, now))
-            if (inserted != -1L) recordInitialMapping(taxItemId, "manual", sourceId, date.toEpochDay(), amountMinor, description.trim(), type, now)
+            if (inserted != -1L) recordInitialMapping(yearId, taxItemId, "manual", sourceId, date.toEpochDay(), amountMinor, description.trim(), type, now)
         }
     }
 
@@ -434,8 +432,13 @@ class FinanceRepository(private val db: AppDatabase) {
      * when [TaxItemDao.insertIfAbsent] actually inserted a row, so recomputation never creates a
      * second mapping history for the same source.
      */
-    private suspend fun recordInitialMapping(taxItemId: String, sourceType: String, sourceId: String, dateEpochDay: Long, amountMinor: Long, description: String, taxEventType: String, createdAt: Long) {
-        val ruleset = defaultPakistanStructuralRules()
+    private suspend fun recordInitialMapping(taxYearId: String, taxItemId: String, sourceType: String, sourceId: String, dateEpochDay: Long, amountMinor: Long, description: String, taxEventType: String, createdAt: Long) {
+        // Classify against the tax year's own stored ruleset version, not always "current" —
+        // otherwise a tax item captured under an older tax year would silently get classified
+        // with today's rules, defeating the "historical ruleset versions remain immutable"
+        // requirement even though the version column itself is stored correctly.
+        val rulesetVersion = db.taxYearDao().getById(taxYearId)?.rulesetVersion ?: pk.vexel.financepassport.core.taxrules.BundledTaxRulesets.CURRENT_VERSION
+        val ruleset = pk.vexel.financepassport.core.taxrules.BundledTaxRulesets.loadVersion(rulesetVersion)
         val candidate = TaxCandidate(sourceType, sourceId, dateEpochDay, Money(MinorUnits(amountMinor), "PKR"), description, runCatching { TaxEventType.valueOf(taxEventType) }.getOrNull(), TaxRelevance.RELEVANT)
         val classification = StructuralTaxClassifier().classify(candidate, ruleset)
         val mapping = classification.mapping
@@ -514,7 +517,11 @@ class FinanceRepository(private val db: AppDatabase) {
     suspend fun prepareAnnualDraft(year: Int = LocalDate.now().year): TaxAnnualDraftEntity {
         val yearId = ensureTaxYearExists(year)
         val items = db.taxItemDao().getAll().filter { it.taxYearId == yearId && it.reviewState != "EXCLUDED" }
-        val rules = defaultPakistanStructuralRules().copy(taxYear = year.toString())
+        // Load the ruleset version this specific tax year was actually created under, not
+        // whatever is "current" now — this is what makes regenerating a draft for an older tax
+        // year keep using that year's original rules even after a newer ruleset version ships.
+        val storedVersion = db.taxYearDao().getById(yearId)?.rulesetVersion ?: pk.vexel.financepassport.core.taxrules.BundledTaxRulesets.CURRENT_VERSION
+        val rules = pk.vexel.financepassport.core.taxrules.BundledTaxRulesets.loadVersion(storedVersion).copy(taxYear = year.toString())
         val domainYear = TaxYear(yearId, "PK", year.toString(), LocalDate.of(year, 1, 1).toEpochDay(), LocalDate.of(year, 12, 31).toEpochDay(), rules.version)
         val candidates = items.mapNotNull { item -> runCatching { TaxEventType.valueOf(item.taxEventType) }.getOrNull()?.let { type -> TaxCandidate(item.sourceType, item.sourceId, item.dateEpochDay, Money(MinorUnits(item.grossAmountMinor ?: 0), item.currency), item.description, type, TaxRelevance.RELEVANT) } }
         val generated = AnnualDraftGenerator().generate(domainYear, rules, candidates)

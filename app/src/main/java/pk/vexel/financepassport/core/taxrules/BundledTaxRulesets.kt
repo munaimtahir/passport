@@ -7,9 +7,29 @@ package pk.vexel.financepassport.core.taxrules
  * plain JVM test, without an Android Context or instrumentation.
  */
 object BundledTaxRulesets {
-    private const val DEFAULT_RESOURCE_PATH = "taxrules/pk-structural-1.json"
+    /**
+     * Which version [loadDefault] resolves to for any *new* tax year/mapping/draft created from
+     * now on. Bumping this never rewrites already-stored `rulesetVersion` columns on
+     * `TaxYearEntity`/`TaxMappingEntity`/`TaxAnnualDraftEntity` rows — those are plain stored
+     * strings, set once at creation — so existing records keep referencing whichever version was
+     * current when they were created, and [loadVersion] can still resolve that exact version's
+     * rules for them (see [pk.vexel.financepassport.core.database.FinanceRepository.prepareAnnualDraft],
+     * which loads the tax year's own stored version rather than always using [loadDefault]).
+     */
+    const val CURRENT_VERSION = "pk-structural-2"
 
-    fun loadDefault(): TaxRuleset = load(DEFAULT_RESOURCE_PATH)
+    private val VERSION_RESOURCES = mapOf(
+        "pk-structural-1" to "taxrules/pk-structural-1.json",
+        "pk-structural-2" to "taxrules/pk-structural-2.json",
+    )
+
+    fun loadDefault(): TaxRuleset = loadVersion(CURRENT_VERSION)
+
+    fun loadVersion(version: String): TaxRuleset {
+        val resourcePath = VERSION_RESOURCES[version]
+            ?: throw RulesetError.MissingField("no bundled ruleset resource is registered for version '$version'")
+        return load(resourcePath)
+    }
 
     fun load(resourcePath: String): TaxRuleset {
         val stream = javaClass.classLoader?.getResourceAsStream(resourcePath)
