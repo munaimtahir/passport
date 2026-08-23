@@ -31,7 +31,23 @@ class DocumentLifecycleDeviceTest {
         return entity
     }
 
+    /**
+     * [TaxItemEntity.taxYearId] carries a Room foreign key to `tax_years` (RESTRICT). Production
+     * code always `INSERT OR IGNORE`s the tax-year row first (see
+     * `FinanceRepository.addEvent`/`ensureTaxYearExists`); this fixture must do the same or every
+     * insert below fails with a FOREIGN KEY constraint violation on a real device (only caught
+     * once this suite actually ran on hardware/emulator, since Room does not validate FK targets
+     * at compile time).
+     */
+    private fun ensureTaxYear(app: PassportApplication, id: String) {
+        app.repository.database.openHelper.writableDatabase.execSQL(
+            "INSERT OR IGNORE INTO tax_years (id, jurisdictionCode, yearLabel, startDateEpochDay, endDateEpochDay, rulesetVersion, status) VALUES (?, 'PK', ?, ?, ?, 'pk-structural-1', 'OPEN')",
+            arrayOf<Any>(id, "2026", LocalDate.of(2026, 1, 1).toEpochDay(), LocalDate.of(2026, 12, 31).toEpochDay()),
+        )
+    }
+
     private fun insertTaxItem(app: PassportApplication, evidenceState: String): TaxItemEntity {
+        ensureTaxYear(app, "PK-2026")
         val id = "tax-${UUID.randomUUID()}"
         val now = Instant.now().toEpochMilli()
         return TaxItemEntity(id, "PK-2026", "financial_event", "src-$id", "OTHER_INCOME", LocalDate.now().toEpochDay(), 10000L, null, "PKR", "Test item", "REVIEWED", evidenceState, null, now, now)
