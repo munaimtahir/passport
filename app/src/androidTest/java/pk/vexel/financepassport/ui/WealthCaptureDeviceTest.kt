@@ -12,17 +12,32 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.assertIsDisplayed
+import android.Manifest
+import android.os.Build
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.rule.GrantPermissionRule
 import java.util.UUID
 import org.junit.Rule
 import org.junit.Test
+import org.junit.runner.Description
 import org.junit.runner.RunWith
+import org.junit.rules.TestRule
+import org.junit.runners.model.Statement
 import pk.vexel.financepassport.MainActivity
 
 @RunWith(AndroidJUnit4::class)
 class WealthCaptureDeviceTest {
     @get:Rule
     val composeRule = createAndroidComposeRule<MainActivity>()
+
+    // See MoneyCaptureDeviceTest for why this is needed on API 33+ (POST_NOTIFICATIONS system
+    // dialog otherwise steals focus from the Compose hierarchy right after MainActivity launches).
+    @get:Rule
+    val notificationPermissionRule: TestRule = object : TestRule {
+        override fun apply(base: Statement, description: Description): Statement = if (Build.VERSION.SDK_INT >= 33) {
+            GrantPermissionRule.grant(Manifest.permission.POST_NOTIFICATIONS).apply(base, description)
+        } else base
+    }
 
     @Test
     fun assetAndLiabilityCaptureUpdateNetWealthSurface() {
