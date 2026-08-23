@@ -1,6 +1,6 @@
 # Vexel Finance Passport — AI Development Pack
 
-**Project type:** Android personal finance, financial-record, document-vault and continuous tax-capture application  
+**Project type:** Android personal finance diary — daily expense/income tracking, bills, debts, receivables, investment planning, document vault, with tax-ready records as a supporting benefit  
 **Public working name:** Vexel Finance Passport  
 **Suggested repository folder:** `finance`  
 **Suggested Android application ID:** `pk.vexel.financepassport`  
@@ -9,17 +9,28 @@
 
 ## Product in one sentence
 
-Vexel Finance Passport is a private digital passport for a person's financial life: accounts, assets, investments, liabilities, income, expenditure, receivables, official records, financial documents and tax-relevant events are captured throughout the year and transformed into organized financial statements and a tax-return-ready annual dataset.
+Vexel Finance Passport is a private personal finance diary for a regular household: the single place to record what you earn, what you spend, what you owe, what's owed to you, and what you're building toward — kept organized enough, all year, to also produce clean financial statements and a tax-return-ready annual dataset without ever re-entering the same fact twice.
 
-## Defining differentiator
+## Core feature pillars
 
-This is **not primarily an expense tracker**.
+Vexel Finance Passport is built for someone with a regular job and a household keeping their own records — not an accountant, not a full-time investor. In priority order:
 
-The defining feature is **Continuous Tax Capture**:
+1. **Daily expense & income tracking** — every transaction, categorized, in one place
+2. **Recurring bills & utilities** — rent, electricity, subscriptions, anything monthly, tracked so nothing's forgotten
+3. **Income sources** — salary, side income, multiple sources, one ledger
+4. **Loans & debts** — what you owe, to whom, repayment progress
+5. **Receivables** — what's owed to you, partial-payment tracking
+6. **Savings & investment planning** — holdings, contributions, growth over time (manually recorded, not live trading)
+7. **Net worth at a glance** — assets, liabilities, liquid funds, one number you trust
+8. **Document vault** — receipts, certificates, records tied to all of the above
 
-> Record a tax-relevant event once, when it happens. The app classifies it, links evidence, carries it through the correct tax year, reconciles it with financial records, and uses it to prepare the annual return dataset when filing time arrives.
+## Supporting feature: tax-ready records
 
-The user should never be asked at return time to re-enter information the app already knows.
+This is **not primarily a tax app** — but because everything above is tracked in one place all year, the app can also keep the user's records tax-ready automatically, without a separate re-entry step:
+
+> Record a tax-relevant event once, when it happens, as part of ordinary diary-keeping. The app classifies it, links evidence, carries it through the correct tax year, reconciles it with financial records, and uses it to prepare the annual return dataset when filing time arrives.
+
+The user should never be asked at return time to re-enter information the app already knows. This is a real, load-bearing capability (see `docs/05_CONTINUOUS_TAX_CAPTURE_ENGINE.md`) — it just isn't the product's identity.
 
 ## Core principles
 

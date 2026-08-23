@@ -4,30 +4,33 @@
 
 Personal financial information is fragmented across bank apps, brokerage portals, PDFs, paper records, tax files, messaging attachments, spreadsheets and memory. Conventional budgeting apps solve only a narrow transaction problem.
 
-Vexel Finance Passport treats the user’s financial life as a **structured personal record**.
+Vexel Finance Passport treats the user's financial life as a **structured personal diary** — built for someone with a regular job and a household keeping their own records, not an accountant or a full-time investor.
 
 It answers:
 
-- What do I own?
-- What do I owe?
-- Where is my money?
-- What changed this year?
+- What did I spend today, this month?
+- What are my recurring bills and utilities?
+- Where does my income come from?
+- What do I owe, and to whom?
+- What's owed to me?
+- What am I saving/investing toward?
+- What do I own, what changed this year?
 - What documents prove it?
-- What tax-relevant events occurred?
-- What information is still missing?
-- Can I produce a coherent annual financial/tax package without reconstructing the year from scratch?
+- Can I produce a coherent annual financial/tax package without reconstructing the year from scratch, because I already kept good records?
 
 ## 2. Product positioning
 
 ### Do say
 
-- Private financial passport
-- Personal financial record
+- Personal finance diary
 - Offline-first financial organizer
-- Continuous tax capture
+- Private financial passport / personal financial record
+- Daily expense and income tracker
+- Loans, debts, and receivables tracker
+- Savings and investment planner
 - Financial document and evidence vault
-- Annual tax preparation workspace
 - Net-worth and financial statement generator
+- Keeps your records tax-ready automatically (supporting feature, not the headline)
 
 ### Do not position MVP as
 
@@ -41,30 +44,30 @@ It answers:
 ## 3. Core product loops
 
 ### Daily / event-driven loop
-Event occurs → user records it → optional tax relevance is assigned → evidence attached → dashboard updates.
+Expense, income, bill payment, or loan/receivable movement occurs → user records it → optional tax relevance is assigned in the background → evidence attached → dashboard updates.
 
 ### Monthly loop
-Review accounts → verify recurring obligations → review missing evidence → confirm tax items.
+Review accounts → verify recurring bills/utilities were paid → check loan/receivable balances → review missing evidence → confirm tax items.
 
 ### Annual loop
-Close tax year → reconcile wealth → resolve missing/uncertain items → generate return-ready dataset and tax pack → user/accountant reviews → mark filed → archive filing acknowledgement.
+Review the year's diary → reconcile wealth → resolve missing/uncertain items → generate a return-ready dataset and tax pack as a byproduct of the records already kept → user/accountant reviews → mark filed → archive filing acknowledgement.
 
 ## 4. User personas
 
-### A. Salaried professional
+### A. Family financial administrator (primary persona)
+A regular salaried household: daily expenses, monthly bills/utilities, income, loans/debts, receivables, savings goals, and organized annual records — this is the core, everyday use case the product is built around.
+
+### B. Salaried professional
 Needs salary, bank profit, investments, assets, withholding certificates and wealth reconciliation.
 
-### B. Mixed-income professional
+### C. Mixed-income professional
 Salary + clinic/consultancy/freelance/business income + investments.
 
-### C. Investor
+### D. Investor
 PSX, mutual funds, dividends, capital gains/losses, CDC/broker statements, bank movements.
 
-### D. Small business owner
+### E. Small business owner
 Personal and business boundaries, receivables, capital introduced, withdrawals, tax evidence.
-
-### E. Family financial administrator
-Needs household assets, obligations, documents, goals and annual financial records.
 
 ## 5. Product rules
 

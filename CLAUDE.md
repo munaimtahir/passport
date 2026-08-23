@@ -27,9 +27,9 @@ This repo follows a strict sprint-and-gate process defined in `docs/10_DEVELOPME
 
 ## Product architecture (once implemented)
 
-**Vexel Finance Passport** — an offline-first, private Android personal-finance / document-vault / continuous-tax-capture app. Application ID `pk.vexel.financepassport`, primary jurisdiction Pakistan (PKR base currency), architected for future jurisdiction packs.
+**Vexel Finance Passport** — an offline-first, private Android **personal finance diary**: the single place a regular household keeps organized records of their money life — daily expenses, monthly bills/utilities, income sources, loans and debts, receivables, savings/investment planning, and overall net worth. Application ID `pk.vexel.financepassport`, primary jurisdiction Pakistan (PKR base currency), architected for future jurisdiction packs. Built for someone with a regular job and a household keeping their own records, not an accountant or a full-time investor.
 
-The defining feature is **Continuous Tax Capture**: a tax-relevant event is recorded once, classified, linked to evidence, carried through the correct tax year, reconciled with financial records, and used to prepare the annual return dataset — the user is never asked to re-enter data the app already has. This is not "just an expense tracker"; treat the tax engine as the product's core, not a bolt-on feature.
+Core feature pillars, in priority order: (1) daily expense & income tracking, (2) recurring bills & utilities, (3) income sources, (4) loans & debts, (5) receivables, (6) savings & investment planning, (7) net worth at a glance, (8) document vault, and — as a supporting benefit of keeping good records, not the product's headline — (9) **Continuous Tax Capture**: because a tax-relevant event was already recorded once as part of ordinary diary-keeping, the app can classify it, link evidence, carry it through the correct tax year, reconcile it with financial records, and use it to prepare the annual return dataset without asking the user to re-enter data it already has. Treat this as a real, load-bearing feature (see `docs/05_CONTINUOUS_TAX_CAPTURE_ENGINE.md`) — just not the app's identity.
 
 ### Non-negotiable product rules (see `docs/01_PRODUCT_VISION_AND_RULES.md` and `docs/14_MASTER_AI_AGENT_BUILD_PROMPT.md`)
 

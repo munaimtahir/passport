@@ -6,13 +6,11 @@ Your task is to build the complete application described in this repository's `/
 
 ## PRODUCT
 
-Vexel Finance Passport is a private, offline-first personal financial passport. It stores accounts, financial events, income, expenses, transfers, assets, liabilities, investments, receivables, goals, official records and encrypted financial documents.
+Vexel Finance Passport is a private, offline-first **personal finance diary** for a regular household: daily expenses, monthly bills/utilities, income sources, loans/debts, receivables, savings/investment planning, and net worth, all in one place, plus encrypted document storage. Built for someone with a regular job and a household keeping their own records — not an accountant or a full-time investor.
 
-Its defining feature is **Continuous Tax Capture**:
+A supporting feature, not the product's identity, is **Continuous Tax Capture**: because financial/tax-relevant events are already recorded once as part of ordinary diary-keeping throughout the year, each item can be linked to its original source and evidence, mapped using a versioned tax ruleset, reviewed in an annual Tax Workspace, reconciled against wealth changes and transformed into an annual tax-return preparation draft with one action.
 
-A user records financial/tax-relevant events throughout the year. Each item is stored once, linked to its original source and evidence, mapped using a versioned tax ruleset, reviewed in an annual Tax Workspace, reconciled against wealth changes and transformed into an annual tax-return preparation draft with one action.
-
-The MVP prepares and exports the annual tax dataset. It must **not** claim or attempt unauthorized direct FBR submission.
+The MVP prepares and exports the annual tax dataset as a byproduct of good record-keeping. It must **not** claim or attempt unauthorized direct FBR submission.
 
 ## NON-NEGOTIABLE PRODUCT RULES
 
