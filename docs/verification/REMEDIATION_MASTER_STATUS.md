@@ -60,8 +60,8 @@ remain as historical audit evidence and are not deleted or rewritten in place.
 | 6 — Vault/records/evidence lifecycle | DONE (scoped) | `863eebd` | See detail below |
 | 7 — Reports/export/backup/calendar | DONE (scoped) | `3d43066` | An earlier attempt at this phase was interrupted by a session limit mid-work; this run picked up its verified-compiling partial diff and finished it — see detail below |
 | 8 — UX/accessibility/security/release hardening | DONE (scoped) | `261fcf3` | An earlier attempt at this phase stalled mid-work; this run verified and finished its uncommitted partial diff — see detail below |
-| 9 — Implementation freeze/clone-ready handoff | DONE | (pending — see below) | See detail below |
-| 10 — Deferred device qualification | STARTING | — | Real emulators (`Android_26_Test`/API 26, `Android_16_Test`/API 36) turned out to be present in this environment; proceeding directly rather than waiting for a separate clone |
+| 9 — Implementation freeze/clone-ready handoff | DONE | `e41309b` | See detail below |
+| 10 — Deferred device qualification | IN PROGRESS (API 26 done) | `f99c999`, `03144b8`, `a0d4296`, `fae1c79` | Real emulators (`Android_26_Test`/API 26, `Android_16_Test`/API 36) turned out to be present in this environment; proceeding directly rather than waiting for a separate clone. API 26 connected suite now 43/43 green; API 36 pass and the rest of Phase 10 (E2E walkthrough, backup equivalence, accessibility, performance, notifications) still to come — see detail below |
 
 This table is updated at the end of every phase in this remediation run.
 
@@ -594,3 +594,85 @@ reference for exactly what Phase 10 requires and doubles as the record of what w
 producing the implementation report and acceptance matrix but before writing the device handoff
 doc or committing anything. This run verified those two files (read in full, found accurate and
 complete), wrote the handoff doc, and committed all three together.
+
+## Phase 10 detail — API 26 (`Android_26_Test`)
+
+This is the first device/emulator work done anywhere in this remediation run. Real AVDs
+(`Android_26_Test`/API 26, `Android_16_Test`/API 36, `Android_15_Test`/API 35) turned out to be
+already prepared in this environment, so Phase 10 proceeds directly here rather than after a
+separate clone, per the note added to `docs/DEVICE_QUALIFICATION_HANDOFF.md`.
+
+### Connected instrumentation suite
+
+First run ever of `./gradlew :app:connectedDebugAndroidTest` against this whole remediation's
+code (every androidTest added across phases 1-9 had only ever been compile-verified before this):
+**43 tests, 37 passed, 6 failed.** All 6 were real, previously-undetected regressions — not
+device-environment flakiness — closed as follows:
+
+1. **`DocumentLifecycleDeviceTest.deletingDocumentRevertsAttachedEvidenceStateInsteadOfLeavingItDangling`
+   / `documentDependencyCountReflectsCurrentLinks`** — `SQLiteConstraintException: FOREIGN KEY
+   constraint failed` in `TaxItemDao_Impl.insertIfAbsent`. Root cause: the test's own
+   `insertTaxItem()` fixture referenced a `tax_years` row it never created. Production code
+   (`FinanceRepository.addEvent`/`ensureTaxYearExists`) already creates that row first — this was a
+   test-fixture bug, not a production one. Fixed by adding `ensureTaxYear()` to the fixture.
+   (`f99c999`)
+2. **`RecurringDraftDeviceTest`** — `TestTag = 'money-list'` not found. A later phase's edit to
+   `MoneyScreen` had dropped `testTag("money-list")` on its `LazyColumn` and
+   `testTag("add-recurring")` on the recurring-draft Add button. Restored both. (`03144b8`)
+3. **`MoneyCaptureDeviceTest.accountAndSalaryCapturePersistThroughUi`** — `'Record income' ... is
+   not displayed!`. Root cause: Phase 2 added `institution`/`notes` fields to `AddAccountDialog`,
+   shifting field order from `[name, amount]` to `[name, institution, amount, notes]`; the test
+   filled fields by blind index, so "100000" landed in the institution field, leaving amount blank
+   and Save disabled — the account was never created. Fixed by tagging every `AddAccountDialog`
+   field (`account-name`/`account-institution`/`account-amount`/`account-notes`) and updating the
+   test to target by tag instead of index. (`03144b8`, `a0d4296`)
+4. **`WealthCaptureDeviceTest.assetAndLiabilityCaptureUpdateNetWealthSurface`** — `'Device Asset
+   ...' is not displayed!`. Diagnosed by running in isolation first (passed cleanly), proving this
+   was a full-suite-ordering artifact rather than a defect in `WealthScreen` itself — see item 6.
+5. **`DocumentPreviewDeviceTest.encryptedImageAndPdfRenderPreviews`** — `JobCancellationException:
+   Job was cancelled`. Same root cause as item 6.
+6. **Root cause of #4/#5, and of a second wave of failures that appeared only after fixing #1-#3:**
+   every androidTest class in one `connectedDebugAndroidTest` invocation shares a single
+   continuous app process and Room database for the whole run (no data reset between classes).
+   `MainViewModel.write()` launches every mutation via a fire-and-forget `viewModelScope.launch`
+   that the dialog's confirm button does not await. When a test method's `Activity` is torn down
+   at the end of that method (`ActivityScenarioRule`), an in-flight write's coroutine is cancelled
+   — including, apparently, mid-transaction on the *shared* Room connection — leaving it wedged for
+   every test that runs afterward in the same process. Confirmed empirically: after fixing #1-#3,
+   a full-suite rerun still failed with `MoneyCaptureDeviceTest`/`RecurringDraftDeviceTest`/
+   `WealthCaptureDeviceTest` all failing together immediately after `DocumentPreviewDeviceTest`'s
+   `JobCancellationException`, while every one of them passed in isolation, and
+   `NavigationSmokeTest` (which performs no writes) passed regardless of position. **Fix:** enabled
+   Android Test Orchestrator (`androidx.test:orchestrator:1.5.1`, `testOptions.execution =
+   "ANDROIDX_TEST_ORCHESTRATOR"`, `testInstrumentationRunnerArguments["clearPackageData"] =
+   "true"`) so every test class gets a genuinely fresh process and app data, matching what each
+   test is actually written to assume. (`fae1c79`) Also added a retry-based
+   `scrollToAndAssertVisible()` helper (retries up to 5s) to the three UI tests immediately after
+   every Save click, since the fire-and-forget write can legitimately still be in flight for a
+   moment even within one clean process — this tolerates that without weakening any assertion.
+   (`a0d4296`)
+
+**Final result after all fixes:** `./gradlew :app:connectedDebugAndroidTest` → **43/43 PASS**,
+confirmed on a second clean run. Full host-side gate (`./gradlew test lint assembleDebug`) also
+re-verified green after these changes (no regression from the orchestrator/build-config change).
+
+### Crash-scan smoke
+
+Not yet performed this pass (time went into diagnosing/fixing the connected-suite regressions
+above, which was the highest-value work). Deferred to the next Phase 10 step, immediately
+following this ledger update, in the same session.
+
+### Backup equivalence gate (mega-prompt 10D)
+
+Not yet attempted — no `DemoUserScenario` seed data exists (Phase 1 deferred it, documented in
+`docs/DEVICE_QUALIFICATION_HANDOFF.md`), and this pass's time went entirely into getting the
+connected suite to a genuinely green baseline first, which is a prerequisite for trusting any
+manual walkthrough evidence gathered afterward. Remains open for a subsequent Phase 10 pass.
+
+### Not yet run this phase
+
+API 36 (`Android_16_Test`) connected suite; manual E2E workflow; accessibility/adaptive
+(TalkBack, font scale, landscape/tablet); process/lifecycle (background/relock/process-death);
+performance (synthetic large dataset — also blocked on no seed data existing); notifications;
+physical-device smoke (no physical device available in this environment, remains open
+regardless).
