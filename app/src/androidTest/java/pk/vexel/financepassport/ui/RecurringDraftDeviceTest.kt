@@ -1,6 +1,9 @@
 package pk.vexel.financepassport.ui
 
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -9,9 +12,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.swipeUp
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import java.util.UUID
@@ -31,12 +32,16 @@ class RecurringDraftDeviceTest {
         composeRule.onNodeWithText("Money", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Recurring drafts", useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Add").performClick()
-        val accountFields = composeRule.onAllNodes(hasSetTextAction())
-        accountFields[0].performTextInput("Recurring Test Account")
-        accountFields[1].performTextInput("100000")
+        composeRule.onNodeWithTag("account-name", useUnmergedTree = true).performTextInput("Recurring Test Account")
+        composeRule.onNodeWithTag("account-amount", useUnmergedTree = true).performTextInput("100000")
         composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
-        composeRule.onNodeWithText("Recurring Test Account", useUnmergedTree = true).assertIsDisplayed()
-        repeat(6) { composeRule.onNodeWithTag("money-list", useUnmergedTree = true).performTouchInput { swipeUp() } }
+        // Every androidTest class in a connected run shares one continuous app install/database,
+        // so earlier test classes may have already added accounts — scroll to the new one directly
+        // rather than assuming a short, fixed-length list, and retry: MainViewModel.addAccount
+        // writes via a fire-and-forget viewModelScope.launch, not awaited by the dialog's confirm
+        // button, so the Room insert + Flow re-emission can genuinely still be in flight here.
+        scrollToAndAssertVisible("Recurring Test Account")
+        composeRule.onNode(hasScrollAction(), useUnmergedTree = true).performScrollToNode(hasTestTag("add-recurring"))
         composeRule.onNodeWithTag("add-recurring", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Add recurring draft", useUnmergedTree = true).assertIsDisplayed()
 
@@ -46,8 +51,26 @@ class RecurringDraftDeviceTest {
         composeRule.onNodeWithTag("recurring-category", useUnmergedTree = true).performTextInput("Household")
         composeRule.onNodeWithTag("recurring-delay", useUnmergedTree = true).performTextInput("1")
         composeRule.onNodeWithText("Save draft", useUnmergedTree = true).performClick()
-        composeRule.onNodeWithText(title).assertIsDisplayed()
+        // MainViewModel.addRecurringItem also writes via a fire-and-forget viewModelScope.launch,
+        // not awaited by the dialog's confirm button — same race as the account save above.
+        scrollToAndAssertVisible(title)
         composeRule.onNodeWithText("Next draft reminder:", substring = true).assertIsDisplayed()
+    }
+
+    private fun scrollToAndAssertVisible(text: String, timeoutMillis: Long = 5_000) {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        var lastError: Throwable? = null
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                composeRule.onNode(hasScrollAction(), useUnmergedTree = true).performScrollToNode(hasText(text))
+                composeRule.onNodeWithText(text, useUnmergedTree = true).assertIsDisplayed()
+                return
+            } catch (error: AssertionError) {
+                lastError = error
+                Thread.sleep(200)
+            }
+        }
+        throw lastError ?: AssertionError("Timed out waiting for '$text' to appear")
     }
 
     private fun dismissOnboardingIfPresent() {

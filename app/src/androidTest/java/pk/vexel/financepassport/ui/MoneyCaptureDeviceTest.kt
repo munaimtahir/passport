@@ -33,11 +33,10 @@ class MoneyCaptureDeviceTest {
         composeRule.onNodeWithContentDescription("Add").performClick()
 
         val accountName = "Device Account ${UUID.randomUUID().toString().take(8)}"
-        val accountFields = composeRule.onAllNodes(hasSetTextAction())
-        accountFields[0].performTextInput(accountName)
-        accountFields[1].performTextInput("100000")
+        composeRule.onNodeWithTag("account-name", useUnmergedTree = true).performTextInput(accountName)
+        composeRule.onNodeWithTag("account-amount", useUnmergedTree = true).performTextInput("100000")
         composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
-        composeRule.onNodeWithText(accountName).assertIsDisplayed()
+        scrollToAndAssertVisible(accountName)
 
         composeRule.onNodeWithText("Income / expense", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Record income", useUnmergedTree = true).assertIsDisplayed()
@@ -75,5 +74,30 @@ class MoneyCaptureDeviceTest {
             composeRule.onAllNodesWithText(text, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         }
         composeRule.onNodeWithText(text, useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+    }
+
+    /**
+     * Every androidTest class in a connected test run shares one continuous app install/database
+     * (no data reset between test classes), so by the time this test runs there may already be
+     * several accounts from earlier test classes — pushing a freshly-added one below the
+     * LazyColumn's currently-composed viewport, so this scrolls to it directly rather than
+     * assuming it's still near the top. It also retries: [MainViewModel.addAccount] writes via a
+     * fire-and-forget `viewModelScope.launch`, not awaited by the dialog's confirm button, so the
+     * Room insert + Flow re-emission can genuinely still be in flight the instant this runs.
+     */
+    private fun scrollToAndAssertVisible(text: String, timeoutMillis: Long = 5_000) {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        var lastError: Throwable? = null
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                composeRule.onNode(hasScrollAction(), useUnmergedTree = true).performScrollToNode(hasText(text))
+                composeRule.onNodeWithText(text, useUnmergedTree = true).assertIsDisplayed()
+                return
+            } catch (error: AssertionError) {
+                lastError = error
+                Thread.sleep(200)
+            }
+        }
+        throw lastError ?: AssertionError("Timed out waiting for '$text' to appear")
     }
 }
