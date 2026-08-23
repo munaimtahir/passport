@@ -77,7 +77,11 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     fun addCalendarItem(context: android.content.Context, title: String, kind: String, delayMinutes: Long) = write { repository.addCalendarItem(context, title, kind, delayMinutes) }
     fun updateCalendarStatus(context: android.content.Context, id: String, status: String) = write { repository.updateCalendarStatus(context, id, status) }
     fun rescheduleCalendarItem(context: android.content.Context, id: String, delayMinutes: Long) = write { repository.rescheduleCalendarItem(context, id, delayMinutes) }
-    fun deleteAllData(context: android.content.Context) = write { repository.deleteAllData(context) }
+    fun deleteAllData(context: android.content.Context, onComplete: () -> Unit = {}) = viewModelScope.launch {
+        runCatching { repository.deleteAllData(context) }
+            .onSuccess { onComplete() }
+            .onFailure { errorMessage = "Could not save this change. Check the fields and try again." }
+    }
     fun prepareAnnualDraft() = viewModelScope.launch { draftMessage = runCatching { "Draft v${repository.prepareAnnualDraft(selectedTaxYear).draftVersion} prepared for $selectedTaxYearId" }.getOrElse { "Draft failed: ${it.message}" } }
     suspend fun getDraftLines(draftId: String) = repository.getDraftLines(draftId)
     fun recordWealthSnapshot(kind: String) = viewModelScope.launch { reconciliationMessage = runCatching { repository.recordWealthSnapshot(selectedTaxYear, kind); "${kind.lowercase().replaceFirstChar { it.uppercase() }} snapshot recorded for $selectedTaxYearId" }.getOrElse { "Snapshot failed: ${it.message}" } }

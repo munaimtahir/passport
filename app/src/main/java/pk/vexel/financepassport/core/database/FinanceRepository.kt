@@ -28,6 +28,8 @@ import pk.vexel.financepassport.core.taxrules.TaxRelevance
 import pk.vexel.financepassport.core.taxrules.TaxYear
 import pk.vexel.financepassport.core.taxrules.defaultPakistanStructuralRules
 import pk.vexel.financepassport.core.taxrules.StructuralTaxClassifier
+import pk.vexel.financepassport.core.security.AppPreferences
+import pk.vexel.financepassport.core.security.PinStore
 import pk.vexel.financepassport.core.taxrules.WealthReconciliationInput
 import pk.vexel.financepassport.core.taxrules.WealthReconciliationResult
 import pk.vexel.financepassport.core.taxrules.reconcileWealth
@@ -328,7 +330,12 @@ class FinanceRepository(private val db: AppDatabase) {
         WorkManager.getInstance(context).cancelAllWork()
         File(context.filesDir, "vault").deleteRecursively()
         context.cacheDir.listFiles()?.filter { it.name.startsWith("passport-") || it.name.startsWith("restore-") || it.name.startsWith("passport-preview-") }?.forEach { it.deleteRecursively() }
-        File(context.applicationInfo.dataDir, "shared_prefs").listFiles()?.forEach { it.delete() }
+        // Clear through the live SharedPreferences instances (not raw file deletion) so any
+        // already-constructed AppPreferences/PinStore in this process — Context caches one
+        // in-memory instance per file — immediately reflects the reset without a process
+        // restart. This is what lets OnboardingGate show onboarding again right after delete-all.
+        AppPreferences(context).clear()
+        PinStore(context).clear()
     }
 
     suspend fun updateTaxReview(id: String, state: String, reason: String? = null) {

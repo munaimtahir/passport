@@ -14,6 +14,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -41,7 +42,11 @@ private val onboardingPages = listOf(
 /** Shows a one-time onboarding flow before [content]; skipped once [AppPreferences.isOnboardingComplete] is true. */
 @Composable
 fun OnboardingGate(preferences: AppPreferences, content: @Composable () -> Unit) {
-    var complete by rememberSaveable { mutableStateOf(preferences.isOnboardingComplete()) }
+    // Plain remember, not rememberSaveable: AppPreferences is already the durable source of
+    // truth for this flag. Caching it in the saved-instance-state Bundle would make it survive
+    // Activity#recreate() (rotation, or the deliberate post-delete-all recreate below), which
+    // would then keep showing the stale pre-delete value instead of re-reading the cleared prefs.
+    var complete by remember { mutableStateOf(preferences.isOnboardingComplete()) }
     if (complete) {
         content()
     } else {

@@ -35,5 +35,8 @@ class PinStore(context: Context) {
     private fun recordFailure() { preferences.edit().putInt(KEY_FAILURES, preferences.getInt(KEY_FAILURES, 0) + 1).putLong(KEY_LAST_FAILURE, System.currentTimeMillis()).apply() }
     private fun clearFailures() { preferences.edit().remove(KEY_FAILURES).remove(KEY_LAST_FAILURE).apply() }
 
+    /** See AppPreferences.clear() for why this goes through the live instance, not file deletion. */
+    fun clear() { preferences.edit().clear().apply() }
+
     private companion object { const val KEY_SALT = "salt"; const val KEY_DIGEST = "digest"; const val KEY_ITERATIONS = "iterations"; const val KEY_FAILURES = "failures"; const val KEY_LAST_FAILURE = "lastFailure" }
 }

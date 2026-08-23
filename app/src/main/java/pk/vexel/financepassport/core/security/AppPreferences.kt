@@ -12,6 +12,15 @@ class AppPreferences(context: Context) {
     fun isPrivacyModeEnabled(): Boolean = preferences.getBoolean(KEY_PRIVACY_MODE, false)
     fun setPrivacyMode(enabled: Boolean) { preferences.edit().putBoolean(KEY_PRIVACY_MODE, enabled).apply() }
 
+    /**
+     * Clears via the live SharedPreferences instance rather than deleting the backing file
+     * directly. Context#getSharedPreferences caches one in-memory instance per file per process;
+     * deleting the file on disk leaves that cached instance (and anything holding a reference to
+     * it, e.g. an already-constructed AppPreferences) still returning stale values until the
+     * process restarts. Clearing through the API updates the shared in-memory instance too.
+     */
+    fun clear() { preferences.edit().clear().apply() }
+
     private companion object {
         const val KEY_ONBOARDING_COMPLETE = "onboardingComplete"
         const val KEY_PRIVACY_MODE = "privacyModeEnabled"
