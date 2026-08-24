@@ -92,6 +92,9 @@ class WealthCaptureDeviceTest {
         while (composeRule.onAllNodesWithTag("onboarding-next").fetchSemanticsNodes().isNotEmpty()) {
             composeRule.onNodeWithTag("onboarding-next").performClick()
         }
+        if (composeRule.onAllNodesWithTag("setup-start-empty").fetchSemanticsNodes().isNotEmpty()) {
+            composeRule.onNodeWithTag("setup-start-empty").performClick()
+        }
     }
 
     private fun unlockIfNeeded() {
