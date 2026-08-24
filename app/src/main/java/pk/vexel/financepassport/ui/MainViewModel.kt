@@ -23,6 +23,7 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
         preferences.setPrivacyMode(privacyModeEnabled)
     }
     val accounts = repository.accounts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val incomeSources = repository.incomeSources.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val recentEvents = repository.recentEvents.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val activeEventCount = repository.activeEventCount.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
     val totals = repository.totals.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
@@ -61,7 +62,8 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     fun accountMovement(accountId: String) = repository.accountMovement(accountId)
     fun updateAccount(id: String, name: String, openingBalanceMinor: Long, institution: String? = null, notes: String? = null) = write { repository.updateAccount(id, name, openingBalanceMinor, institution, notes) }
     fun archiveAccount(id: String) = write { repository.archiveAccount(id) }
-    fun addEvent(type: FinancialEventType, amountMinor: Long, accountId: String, description: String, category: String? = null, date: LocalDate = LocalDate.now()) = write { repository.addEvent(type, amountMinor, accountId, description, category, date = date) }
+    fun addEvent(type: FinancialEventType, amountMinor: Long, accountId: String, description: String, category: String? = null, date: LocalDate = LocalDate.now(), incomeSourceId: String? = null) = write { repository.addEvent(type, amountMinor, accountId, description, category, date = date, incomeSourceId = incomeSourceId) }
+    fun addIncomeSource(name: String, sourceType: String, payerOrEmployer: String? = null) = write { repository.addIncomeSource(name, sourceType, payerOrEmployer) }
     fun addRecurringItem(context: android.content.Context, title: String, type: FinancialEventType, amountMinor: Long, accountId: String, category: String?, frequency: String, delayDays: Long) = write { repository.addRecurringItem(context, title, type, amountMinor, accountId, category, frequency, delayDays) }
     fun pauseRecurringItem(context: android.content.Context, id: String) = write { repository.pauseRecurringItem(context, id) }
     fun transfer(source: String, destination: String, amountMinor: Long, description: String, date: LocalDate = LocalDate.now()) = write { repository.transfer(source, destination, amountMinor, description, date) }
