@@ -210,6 +210,10 @@ private fun HomeScreen(vm: MainViewModel, application: PassportApplication, padd
     val position by vm.financialPosition.collectAsState()
     val taxItems by vm.taxItems.collectAsState()
     val readiness = pk.vexel.financepassport.core.model.calculateTaxReadiness(taxItems)
+    val assets by vm.assets.collectAsState()
+    val liabilities by vm.liabilities.collectAsState()
+    val investments by vm.investments.collectAsState()
+    val goalProgress by vm.goalProgress.collectAsState()
     var showCalendarAdd by rememberSaveable { mutableStateOf(false) }
     var rescheduleTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.CalendarItemEntity?>(null) }
     var showQuickEvent by rememberSaveable { mutableStateOf(false) }
@@ -232,15 +236,6 @@ private fun HomeScreen(vm: MainViewModel, application: PassportApplication, padd
                             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Liabilities"); Text(MaskedPkr(-position!!.liabilitiesValueMinor)) }
                         }
                     }
-                }
-            }
-        }
-        item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp), Arrangement.spacedBy(4.dp)) {
-                    Text("Income vs. expense this period", style = MaterialTheme.typography.labelLarge)
-                    Text(MaskedPkr((totals?.first?.minorUnits?.value ?: 0L) - (totals?.second?.minorUnits?.value ?: 0L)), style = MaterialTheme.typography.titleLarge)
-                    Text("Income ${MaskedPkr(position?.monthlyIncomeMinor ?: 0L)} · Expense ${MaskedPkr(position?.monthlyExpenseMinor ?: 0L)} this month, from ${accounts.size} active account(s) and $activeEventCount recorded event(s).", style = MaterialTheme.typography.bodySmall)
                 }
             }
         }
@@ -273,6 +268,35 @@ private fun HomeScreen(vm: MainViewModel, application: PassportApplication, padd
         item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Upcoming obligations", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showCalendarAdd = true }) { Text("Add") } } }
         if (calendarItems.isEmpty()) item { Text("No reminders scheduled.") }
         items(calendarItems.take(5), key = { it.id }) { reminder -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(reminder.title, style = MaterialTheme.typography.titleMedium); Text(reminder.kind); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = { rescheduleTarget = reminder }) { Text("Reschedule") }; TextButton(onClick = { vm.updateCalendarStatus(application, reminder.id, "COMPLETED") }) { Text("Complete") }; TextButton(onClick = { vm.updateCalendarStatus(application, reminder.id, "CANCELLED") }) { Text("Cancel") } } } } }
+        item { Text("Money summary", style = MaterialTheme.typography.titleLarge) }
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp), Arrangement.spacedBy(4.dp)) {
+                    Text("Income vs. expense this period", style = MaterialTheme.typography.labelLarge)
+                    Text(MaskedPkr((totals?.first?.minorUnits?.value ?: 0L) - (totals?.second?.minorUnits?.value ?: 0L)), style = MaterialTheme.typography.titleLarge)
+                    Text("Income ${MaskedPkr(position?.monthlyIncomeMinor ?: 0L)} · Expense ${MaskedPkr(position?.monthlyExpenseMinor ?: 0L)} this month, from ${accounts.size} active account(s) and $activeEventCount recorded event(s).", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        item { Text("Wealth summary", style = MaterialTheme.typography.titleLarge) }
+        item {
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(20.dp), Arrangement.spacedBy(4.dp)) {
+                    Text("${assets.size} asset(s) · ${liabilities.size} liability/liabilities · ${investments.groupBy { it.securityName }.size} investment holding(s)", style = MaterialTheme.typography.bodyMedium)
+                    Text("Assets ${MaskedPkr(position?.assetsValueMinor ?: 0L)} · Liabilities ${MaskedPkr(-(position?.liabilitiesValueMinor ?: 0L))}", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+        if (goalProgress.isNotEmpty()) {
+            item { Text("Goals", style = MaterialTheme.typography.titleLarge) }
+            items(goalProgress.take(2), key = { (goal, _) -> "home-goal-${goal.id}" }) { (goal, progress) ->
+                Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) {
+                    Text(goal.title, style = MaterialTheme.typography.titleMedium)
+                    LinearProgressIndicator(progress = { progress.progressPercent / 100f }, modifier = Modifier.fillMaxWidth())
+                    Text(if (progress.isAchieved) "Achieved" else "${progress.progressPercent}% of target", style = MaterialTheme.typography.bodySmall)
+                } }
+            }
+        }
         item { Text("Recent activity", style = MaterialTheme.typography.titleLarge) }
         items(recentEvents.take(5), key = { it.id }) { event -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(event.description); Text(MaskedPkr(event.amountMinor)) } }
     }
