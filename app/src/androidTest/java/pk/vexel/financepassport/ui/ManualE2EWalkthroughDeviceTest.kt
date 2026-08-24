@@ -2,6 +2,9 @@ package pk.vexel.financepassport.ui
 
 import android.Manifest
 import android.os.Build
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
@@ -76,8 +79,8 @@ class ManualE2EWalkthroughDeviceTest {
         assertVisible(assetName)
 
         val liabilityName = "E2E Liability ${UUID.randomUUID().toString().take(8)}"
-        composeRule.onAllNodesWithText("Add", useUnmergedTree = true)[0].performClick()
-        composeRule.onNodeWithTag("wealth-mode-LIABILITY", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("wealth-tab-LIABILITY", useUnmergedTree = true).performScrollTo().performClick()
+        composeRule.onNodeWithText("Add", useUnmergedTree = true).performClick()
         composeRule.onNodeWithTag("wealth-name", useUnmergedTree = true).performTextInput(liabilityName)
         composeRule.onNodeWithTag("wealth-amount", useUnmergedTree = true).performTextInput("5000")
         composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
@@ -132,13 +135,21 @@ class ManualE2EWalkthroughDeviceTest {
         }
     }
 
-    /** See MoneyCaptureDeviceTest/WealthCaptureDeviceTest for why this retries: writes are fire-and-forget. */
+    /**
+     * See MoneyCaptureDeviceTest/WealthCaptureDeviceTest for why this retries: writes are
+     * fire-and-forget. Matches vertical scroll specifically (not just any hasScrollAction()) since
+     * the Wealth screen has a second, horizontally-scrollable region (the tab row) since Sprint 19.
+     */
+    private val isVerticallyScrollable = SemanticsMatcher("isVerticallyScrollable") {
+        it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null
+    }
+
     private fun assertVisible(text: String, timeoutMillis: Long = 8_000, substring: Boolean = false) {
         val deadline = System.currentTimeMillis() + timeoutMillis
         var lastError: Throwable? = null
         while (System.currentTimeMillis() < deadline) {
             try {
-                composeRule.onNode(hasScrollAction(), useUnmergedTree = true)
+                composeRule.onNode(isVerticallyScrollable, useUnmergedTree = true)
                     .performScrollToNode(hasText(text, substring = substring))
                 composeRule.onNode(hasText(text, substring = substring), useUnmergedTree = true).assertIsDisplayed()
                 return

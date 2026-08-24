@@ -1,6 +1,8 @@
 package pk.vexel.financepassport.ui
 
-import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -54,8 +56,8 @@ class WealthCaptureDeviceTest {
         scrollToAndAssertVisible(assetName)
 
         val liabilityName = "Device Liability ${UUID.randomUUID().toString().take(8)}"
-        composeRule.onAllNodesWithText("Add", useUnmergedTree = true)[0].performClick()
-        composeRule.onNodeWithTag("wealth-mode-LIABILITY", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("wealth-tab-LIABILITY", useUnmergedTree = true).performScrollTo().performClick()
+        composeRule.onNodeWithText("Add", useUnmergedTree = true).performClick()
         composeRule.onNodeWithTag("wealth-name", useUnmergedTree = true).performTextInput(liabilityName)
         composeRule.onNodeWithTag("liability-type-PERSONAL_LOAN", useUnmergedTree = true).performScrollTo().performClick()
         composeRule.onNodeWithTag("liability-lender", useUnmergedTree = true).performTextInput("Device Bank")
@@ -72,8 +74,12 @@ class WealthCaptureDeviceTest {
         composeRule.onNodeWithText("Wealth", useUnmergedTree = true).performClick()
 
         val goalName = "Device Goal ${UUID.randomUUID().toString().take(8)}"
-        composeRule.onAllNodesWithText("Add", useUnmergedTree = true)[0].performClick()
-        composeRule.onNodeWithTag("wealth-mode-GOAL", useUnmergedTree = true).performScrollTo().performClick()
+        // GOAL is the last tab and starts off-screen in the ScrollableTabRow — performScrollTo()
+        // is required here (unlike LIABILITY above, which happens to already be visible): a plain
+        // performClick() on an off-screen Tab silently invokes onClick without the tab row's
+        // internal scroll-position state actually settling, so the selection never visibly commits.
+        composeRule.onNodeWithTag("wealth-tab-GOAL", useUnmergedTree = true).performScrollTo().performClick()
+        composeRule.onNodeWithText("Add", useUnmergedTree = true).performClick()
         composeRule.onNodeWithTag("goal-type-PURCHASE", useUnmergedTree = true).performScrollTo().performClick()
         composeRule.onNodeWithTag("wealth-name", useUnmergedTree = true).performTextInput(goalName)
         composeRule.onNodeWithTag("wealth-amount", useUnmergedTree = true).performTextInput("1000")
@@ -99,12 +105,22 @@ class WealthCaptureDeviceTest {
      * `viewModelScope.launch`, not awaited by the dialog's confirm button, so the Room insert +
      * Flow re-emission can genuinely still be in flight the instant this runs.
      */
+    /**
+     * The Wealth screen now has two scrollable regions (the tab row's horizontal scroll and the
+     * list's vertical scroll) since Sprint 19's segmentation — plain hasScrollAction() matches
+     * both and throws "found 2 nodes". Match on the vertical scroll axis specifically so this
+     * still resolves to exactly the list.
+     */
+    private val isVerticallyScrollable = SemanticsMatcher("isVerticallyScrollable") {
+        it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null
+    }
+
     private fun scrollToAndAssertVisible(text: String, timeoutMillis: Long = 5_000) {
         val deadline = System.currentTimeMillis() + timeoutMillis
         var lastError: Throwable? = null
         while (System.currentTimeMillis() < deadline) {
             try {
-                composeRule.onNode(hasScrollAction(), useUnmergedTree = true).performScrollToNode(hasText(text))
+                composeRule.onNode(isVerticallyScrollable, useUnmergedTree = true).performScrollToNode(hasText(text))
                 composeRule.onNodeWithText(text, useUnmergedTree = true).assertIsDisplayed()
                 return
             } catch (error: AssertionError) {

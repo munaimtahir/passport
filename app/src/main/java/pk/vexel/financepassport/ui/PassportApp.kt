@@ -49,6 +49,8 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SecondaryScrollableTabRow
+import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -500,52 +502,74 @@ private fun WealthScreen(vm: MainViewModel, padding: PaddingValues) {
     var liabilityPaymentTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.LiabilityEntity?>(null) }
     var receivablePaymentTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.ReceivableEntity?>(null) }
     var goalContributeTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.GoalEntity?>(null) }
-    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        item { Text("Wealth", style = MaterialTheme.typography.headlineMedium) }
-        item { Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text("Recorded net wealth", style = MaterialTheme.typography.labelLarge); Text(MaskedPkr(assetTotal - liabilityTotal), style = MaterialTheme.typography.headlineLarge); Text("Assets ${MaskedPkr(assetTotal)} · Liabilities ${MaskedPkr(liabilityTotal)}") } } }
-        item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Assets", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showAdd = true }) { Text("Add") } } }
-        if (assets.isEmpty()) item { Text("No assets recorded yet.") }
-        items(assets, key = { it.id }) { asset -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(asset.title, style = MaterialTheme.typography.titleMedium); Text("${asset.type} · current ${MaskedPkr(asset.currentEstimatedValueMinor)} · acquired ${MaskedPkr(asset.acquisitionCostMinor)}"); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = { valuationTarget = asset }) { Text("Update value") }; TextButton(onClick = { disposalTarget = asset }) { Text("Dispose") } } } } }
-        item { Text("Liabilities", style = MaterialTheme.typography.titleLarge) }
-        if (liabilities.isEmpty()) item { Text("No liabilities recorded yet.") }
-        items(liabilities, key = { it.id }) { liability -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(liability.title, style = MaterialTheme.typography.titleMedium); Text("${liability.type} · outstanding ${MaskedPkr(liability.outstandingAmountMinor)} of ${MaskedPkr(liability.originalAmountMinor)}"); liability.lender?.let { Text("Lender: $it", style = MaterialTheme.typography.bodySmall) }; liability.dueDateEpochDay?.let { Text("Due ${java.time.LocalDate.ofEpochDay(it)}", style = MaterialTheme.typography.bodySmall) }; liability.installmentAmountMinor?.let { Text("Installment ${MaskedPkr(it)}", style = MaterialTheme.typography.bodySmall) }; liability.interestRateBps?.let { Text("Interest ${it / 100.0}%", style = MaterialTheme.typography.bodySmall) }; TextButton(onClick = { liabilityPaymentTarget = liability }) { Text("Record repayment") } } } }
-        item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Investments", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showAdd = true }) { Text("Add") } } }
-        if (investments.isEmpty()) item { Text("No investment events yet.") }
-        val holdings = investments.groupBy { it.securityName }.entries.sortedBy { it.key }
-        items(holdings, key = { (security, _) -> "holding-$security" }) { (security, events) ->
-            val position = pk.vexel.financepassport.core.model.calculateInvestmentPosition(security, events)
-            Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) {
-                Text(security, style = MaterialTheme.typography.titleMedium)
-                Text("Held ${position.quantityMinor} · cost basis ${MaskedPkr(position.costBasisMinor)}")
-                Text("Realized gain/loss ${MaskedPkr(position.realizedGainLossMinor)} · income (net of withholding) ${MaskedPkr(position.incomeMinor)}", style = MaterialTheme.typography.bodySmall)
-                Text("No live market price is used; cost basis is the recorded, traceable investment value.", style = MaterialTheme.typography.bodySmall)
-            } }
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
+    val tabModes = listOf("ASSET", "INVESTMENT", "LIABILITY", "RECEIVABLE", "GOAL")
+    val tabLabels = listOf("Assets", "Investments", "Liabilities", "Receivables", "Goals")
+    Column(Modifier.fillMaxSize().padding(padding)) {
+        Column(Modifier.padding(20.dp), Arrangement.spacedBy(12.dp)) {
+            Text("Wealth", style = MaterialTheme.typography.headlineMedium)
+            Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text("Recorded net wealth", style = MaterialTheme.typography.labelLarge); Text(MaskedPkr(assetTotal - liabilityTotal), style = MaterialTheme.typography.headlineLarge); Text("Assets ${MaskedPkr(assetTotal)} · Liabilities ${MaskedPkr(liabilityTotal)}") } }
         }
-        item { Text("Investment activity", style = MaterialTheme.typography.titleSmall) }
-        items(investments, key = { it.id }) { event -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text("${event.securityName} · ${event.investmentAccountId}", style = MaterialTheme.typography.titleMedium); Text("${event.type} · ${MaskedPkr(event.grossAmountMinor)}") } } }
-        item { Text("Receivables", style = MaterialTheme.typography.titleLarge) }
-        if (receivables.isEmpty()) item { Text("No receivables yet.") }
-        items(receivables, key = { it.id }) { value -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(value.title, style = MaterialTheme.typography.titleMedium); Text("${value.counterparty} · outstanding ${MaskedPkr(value.outstandingAmountMinor)} of ${MaskedPkr(value.originalAmountMinor)}"); value.dueDateEpochDay?.let { Text("Due ${java.time.LocalDate.ofEpochDay(it)}", style = MaterialTheme.typography.bodySmall) }; if (value.outstandingAmountMinor > 0) TextButton(onClick = { receivablePaymentTarget = value }) { Text("Record receipt") } } } }
-        item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Goals", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showAdd = true }) { Text("Add") } } }
-        if (goalProgress.isEmpty()) item { Text("No goals yet.") }
-        items(goalProgress, key = { (goal, _) -> goal.id }) { (goal, progress) ->
-            Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) {
-                Text(goal.title, style = MaterialTheme.typography.titleMedium)
-                Text("${goal.goalType} · ${MaskedPkr(goal.currentAmountMinor)} of ${MaskedPkr(goal.targetAmountMinor)}")
-                LinearProgressIndicator(progress = { progress.progressPercent / 100f }, modifier = Modifier.fillMaxWidth().testTag("goal-progress-${goal.id}"))
-                Text(
-                    when {
-                        progress.isAchieved -> "Achieved"
-                        goal.targetDateEpochDay != null -> "${progress.progressPercent}% · target ${java.time.LocalDate.ofEpochDay(goal.targetDateEpochDay)} · needs ${MaskedPkr(progress.requiredMonthlySavingsMinor ?: 0)}/mo"
-                        else -> "${progress.progressPercent}% of target"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                )
-                if (!progress.isAchieved) TextButton(onClick = { goalContributeTarget = goal }) { Text("Contribute") }
-            } }
+        SecondaryScrollableTabRow(selectedTabIndex = selectedTab, modifier = Modifier.testTag("wealth-tabs")) {
+            tabLabels.forEachIndexed { index, label -> Tab(selected = selectedTab == index, onClick = { selectedTab = index }, text = { Text(label) }, modifier = Modifier.testTag("wealth-tab-${tabModes[index]}")) }
+        }
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            when (selectedTab) {
+                0 -> {
+                    item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Assets", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showAdd = true }) { Text("Add") } } }
+                    if (assets.isEmpty()) item { Text("No assets recorded yet.") }
+                    items(assets, key = { it.id }) { asset -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(asset.title, style = MaterialTheme.typography.titleMedium); Text("${asset.type} · current ${MaskedPkr(asset.currentEstimatedValueMinor)} · acquired ${MaskedPkr(asset.acquisitionCostMinor)}"); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = { valuationTarget = asset }) { Text("Update value") }; TextButton(onClick = { disposalTarget = asset }) { Text("Dispose") } } } } }
+                }
+                1 -> {
+                    item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Investments", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showAdd = true }) { Text("Add") } } }
+                    if (investments.isEmpty()) item { Text("No investment events yet.") }
+                    val holdings = investments.groupBy { it.securityName }.entries.sortedBy { it.key }
+                    items(holdings, key = { (security, _) -> "holding-$security" }) { (security, events) ->
+                        val position = pk.vexel.financepassport.core.model.calculateInvestmentPosition(security, events)
+                        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) {
+                            Text(security, style = MaterialTheme.typography.titleMedium)
+                            Text("Held ${position.quantityMinor} · cost basis ${MaskedPkr(position.costBasisMinor)}")
+                            Text("Realized gain/loss ${MaskedPkr(position.realizedGainLossMinor)} · income (net of withholding) ${MaskedPkr(position.incomeMinor)}", style = MaterialTheme.typography.bodySmall)
+                            Text("No live market price is used; cost basis is the recorded, traceable investment value.", style = MaterialTheme.typography.bodySmall)
+                        } }
+                    }
+                    item { Text("Investment activity", style = MaterialTheme.typography.titleSmall) }
+                    items(investments, key = { it.id }) { event -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text("${event.securityName} · ${event.investmentAccountId}", style = MaterialTheme.typography.titleMedium); Text("${event.type} · ${MaskedPkr(event.grossAmountMinor)}") } } }
+                }
+                2 -> {
+                    item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Liabilities", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showAdd = true }) { Text("Add") } } }
+                    if (liabilities.isEmpty()) item { Text("No liabilities recorded yet.") }
+                    items(liabilities, key = { it.id }) { liability -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(liability.title, style = MaterialTheme.typography.titleMedium); Text("${liability.type} · outstanding ${MaskedPkr(liability.outstandingAmountMinor)} of ${MaskedPkr(liability.originalAmountMinor)}"); liability.lender?.let { Text("Lender: $it", style = MaterialTheme.typography.bodySmall) }; liability.dueDateEpochDay?.let { Text("Due ${java.time.LocalDate.ofEpochDay(it)}", style = MaterialTheme.typography.bodySmall) }; liability.installmentAmountMinor?.let { Text("Installment ${MaskedPkr(it)}", style = MaterialTheme.typography.bodySmall) }; liability.interestRateBps?.let { Text("Interest ${it / 100.0}%", style = MaterialTheme.typography.bodySmall) }; TextButton(onClick = { liabilityPaymentTarget = liability }) { Text("Record repayment") } } } }
+                }
+                3 -> {
+                    item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Receivables", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showAdd = true }) { Text("Add") } } }
+                    if (receivables.isEmpty()) item { Text("No receivables yet.") }
+                    items(receivables, key = { it.id }) { value -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(value.title, style = MaterialTheme.typography.titleMedium); Text("${value.counterparty} · outstanding ${MaskedPkr(value.outstandingAmountMinor)} of ${MaskedPkr(value.originalAmountMinor)}"); value.dueDateEpochDay?.let { Text("Due ${java.time.LocalDate.ofEpochDay(it)}", style = MaterialTheme.typography.bodySmall) }; if (value.outstandingAmountMinor > 0) TextButton(onClick = { receivablePaymentTarget = value }) { Text("Record receipt") } } } }
+                }
+                4 -> {
+                    item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Goals", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showAdd = true }) { Text("Add") } } }
+                    if (goalProgress.isEmpty()) item { Text("No goals yet.") }
+                    items(goalProgress, key = { (goal, _) -> goal.id }) { (goal, progress) ->
+                        Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) {
+                            Text(goal.title, style = MaterialTheme.typography.titleMedium)
+                            Text("${goal.goalType} · ${MaskedPkr(goal.currentAmountMinor)} of ${MaskedPkr(goal.targetAmountMinor)}")
+                            LinearProgressIndicator(progress = { progress.progressPercent / 100f }, modifier = Modifier.fillMaxWidth().testTag("goal-progress-${goal.id}"))
+                            Text(
+                                when {
+                                    progress.isAchieved -> "Achieved"
+                                    goal.targetDateEpochDay != null -> "${progress.progressPercent}% · target ${java.time.LocalDate.ofEpochDay(goal.targetDateEpochDay)} · needs ${MaskedPkr(progress.requiredMonthlySavingsMinor ?: 0)}/mo"
+                                    else -> "${progress.progressPercent}% of target"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                            )
+                            if (!progress.isAchieved) TextButton(onClick = { goalContributeTarget = goal }) { Text("Contribute") }
+                        } }
+                    }
+                }
+            }
         }
     }
-    if (showAdd) AddWealthDialog(vm) { showAdd = false }
+    if (showAdd) AddWealthDialog(vm, initialMode = tabModes[selectedTab]) { showAdd = false }
     valuationTarget?.let { asset -> AmountDialog("Update ${asset.title} valuation", "Current value (PKR)", onDismiss = { valuationTarget = null }) { value -> vm.updateAssetValuation(asset.id, value * 100); valuationTarget = null } }
     disposalTarget?.let { asset -> AmountDialog("Dispose ${asset.title}", "Disposal value (PKR)", onDismiss = { disposalTarget = null }) { value -> vm.disposeAsset(asset.id, value * 100); disposalTarget = null } }
     liabilityPaymentTarget?.let { liability -> AmountDialog("Repay ${liability.title}", "Payment (PKR)", onDismiss = { liabilityPaymentTarget = null }) { value -> vm.recordLiabilityPayment(liability.id, value * 100); liabilityPaymentTarget = null } }
@@ -554,9 +578,13 @@ private fun WealthScreen(vm: MainViewModel, padding: PaddingValues) {
 }
 
 @Composable
-private fun AddWealthDialog(vm: MainViewModel, onDismiss: () -> Unit) {
+private fun AddWealthDialog(vm: MainViewModel, initialMode: String = "ASSET", onDismiss: () -> Unit) {
     val context = LocalContext.current
-    var mode by rememberSaveable { mutableStateOf("ASSET") }
+    // Keyed on initialMode: without this, rememberSaveable restores whatever mode this dialog was
+    // left on the last time it was open within this Activity session (e.g. closed while on
+    // LIABILITY from a previous tab), silently ignoring a freshly-passed initialMode from a
+    // different tab's Add button.
+    var mode by rememberSaveable(initialMode) { mutableStateOf(initialMode) }
     var title by rememberSaveable { mutableStateOf("") }
     var secondary by rememberSaveable { mutableStateOf("") }
     var amount by rememberSaveable { mutableStateOf("") }
