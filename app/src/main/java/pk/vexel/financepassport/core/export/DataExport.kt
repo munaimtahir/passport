@@ -14,6 +14,7 @@ import pk.vexel.financepassport.core.database.BudgetEntity
 import pk.vexel.financepassport.core.database.TaxMappingEntity
 import pk.vexel.financepassport.core.database.WealthSnapshotEntity
 import pk.vexel.financepassport.core.database.TaxAnnualDraftEntity
+import pk.vexel.financepassport.core.database.IncomeSourceEntity
 
 data class ExportSnapshot(
     val accounts: List<AccountEntity>, val events: List<FinancialEventEntity>, val assets: List<AssetEntity>,
@@ -24,6 +25,7 @@ data class ExportSnapshot(
     val taxMappings: List<TaxMappingEntity> = emptyList(),
     val wealthSnapshots: List<WealthSnapshotEntity> = emptyList(),
     val taxDrafts: List<TaxAnnualDraftEntity> = emptyList(),
+    val incomeSources: List<IncomeSourceEntity> = emptyList(),
 ) {
     fun forDateRange(fromEpochDay: Long, toEpochDay: Long): ExportSnapshot {
         require(fromEpochDay <= toEpochDay) { "Report range is invalid" }
@@ -51,7 +53,8 @@ class DataExportService {
         append("\"budgets\":["); append(snapshot.budgets.joinToString(",") { "{\"id\":\"${it.id}\",\"category\":\"${escape(it.category)}\",\"monthlyLimitMinor\":${it.monthlyLimitMinor}}" }); append("],")
         append("\"taxMappings\":["); append(snapshot.taxMappings.joinToString(",") { "{\"id\":\"${it.id}\",\"taxItemId\":\"${it.taxItemId}\",\"rulesetVersion\":\"${escape(it.rulesetVersion)}\",\"taxEventType\":\"${it.taxEventType}\",\"source\":\"${it.source}\",\"supersededByMappingId\":${it.supersededByMappingId?.let { id -> "\"$id\"" } ?: "null"}}" }); append("],")
         append("\"wealthSnapshots\":["); append(snapshot.wealthSnapshots.joinToString(",") { "{\"id\":\"${it.id}\",\"taxYearId\":\"${it.taxYearId}\",\"kind\":\"${it.kind}\",\"netWealthMinor\":${it.netWealthMinor}}" }); append("],")
-        append("\"taxDrafts\":["); append(snapshot.taxDrafts.joinToString(",") { "{\"id\":\"${it.id}\",\"taxYearId\":\"${it.taxYearId}\",\"draftVersion\":${it.draftVersion},\"rulesetVersion\":\"${escape(it.rulesetVersion)}\",\"status\":\"${it.status}\"}" }); append("]}")
+        append("\"taxDrafts\":["); append(snapshot.taxDrafts.joinToString(",") { "{\"id\":\"${it.id}\",\"taxYearId\":\"${it.taxYearId}\",\"draftVersion\":${it.draftVersion},\"rulesetVersion\":\"${escape(it.rulesetVersion)}\",\"status\":\"${it.status}\"}" }); append("],")
+        append("\"incomeSources\":["); append(snapshot.incomeSources.joinToString(",") { "{\"id\":\"${it.id}\",\"name\":\"${escape(it.name)}\",\"sourceType\":\"${it.sourceType}\",\"status\":\"${it.status}\"}" }); append("]}")
     }
 
     fun csvEvents(snapshot: ExportSnapshot): String = buildString {

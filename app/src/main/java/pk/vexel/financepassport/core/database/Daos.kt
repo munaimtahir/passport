@@ -27,6 +27,23 @@ interface AccountDao {
 }
 
 @Dao
+interface IncomeSourceDao {
+    @Query("SELECT * FROM income_sources ORDER BY name")
+    suspend fun getAll(): List<IncomeSourceEntity>
+    @Query("SELECT * FROM income_sources WHERE status = 'ACTIVE' ORDER BY name")
+    fun observeActive(): Flow<List<IncomeSourceEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(incomeSource: IncomeSourceEntity)
+
+    @Query("SELECT * FROM income_sources WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): IncomeSourceEntity?
+
+    @Query("UPDATE income_sources SET status = 'ARCHIVED', updatedAtEpochMillis = :updatedAt WHERE id = :id")
+    suspend fun archive(id: String, updatedAt: Long)
+}
+
+@Dao
 interface WealthDao {
     @Query("SELECT * FROM assets ORDER BY title")
     suspend fun getAllAssets(): List<AssetEntity>

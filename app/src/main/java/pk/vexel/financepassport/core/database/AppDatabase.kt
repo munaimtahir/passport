@@ -3,6 +3,12 @@ package pk.vexel.financepassport.core.database
 import androidx.room.Database
 import androidx.room.RoomDatabase
 
+// Single source of truth for the schema version. Referenced here AND wherever the encrypted-backup
+// manifest's schemaVersion is written (FinanceRepository) so the two can never drift apart again —
+// this project has already hit that exact bug twice (the 8->9 and 9->10 boundaries), both times
+// from a hardcoded literal at the manifest call site.
+const val DATABASE_VERSION = 11
+
 @Database(
     entities = [
         UserProfileEntity::class,
@@ -29,12 +35,14 @@ import androidx.room.RoomDatabase
         OfficialRecordEntity::class,
         ChangeLogEntity::class,
         BudgetEntity::class,
+        IncomeSourceEntity::class,
     ],
-    version = 10,
+    version = DATABASE_VERSION,
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun accountDao(): AccountDao
+    abstract fun incomeSourceDao(): IncomeSourceDao
     abstract fun financialEventDao(): FinancialEventDao
     abstract fun transferLinkDao(): TransferLinkDao
     abstract fun wealthDao(): WealthDao
