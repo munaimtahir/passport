@@ -173,6 +173,21 @@ class AppDatabaseTest {
     }
 
     @Test
+    fun addGoalPersistsRealGoalTypeAndTargetDateInsteadOfHardcodedDefaults() = runBlocking {
+        val repository = FinanceRepository(database)
+        val targetDate = 20000L
+        repository.addGoal("New car", 500_000, "PURCHASE", targetDate)
+        val goal = database.goalDao().getAll().single()
+        assertEquals("PURCHASE", goal.goalType)
+        assertEquals(targetDate, goal.targetDateEpochDay)
+        // Omitting the new params still falls back to the pre-Sprint-18 defaults, not a crash.
+        repository.addGoal("Untyped goal", 10_000)
+        val untyped = database.goalDao().getAll().first { it.title == "Untyped goal" }
+        assertEquals("CUSTOM", untyped.goalType)
+        assertEquals(null, untyped.targetDateEpochDay)
+    }
+
+    @Test
     fun budgetStatusReflectsOnlyCurrentMonthNonDeletedExpensesForItsCategory() = runBlocking {
         val repository = FinanceRepository(database)
         repository.addBudget("Food", 10_000)
