@@ -147,7 +147,12 @@ class AppDatabaseTest {
         assertEquals(1, lines.size)
         assertTrue(lines.single().sourceIdsJson.contains(source.sourceId))
         assertTrue(lines.single().calculation.isNotBlank())
-        assertEquals(1, database.taxIssueDao().getForDraft(draft.id).size)
+        // 2 issues expected: the classifier's issue for the manual item, plus MISSING_OPENING_SNAPSHOT
+        // (this test never records an opening WealthSnapshotEntity for the year) — both are correct,
+        // independent findings, not a duplicate.
+        val issues = database.taxIssueDao().getForDraft(draft.id)
+        assertEquals(2, issues.size)
+        assertTrue(issues.any { it.code == "MISSING_OPENING_SNAPSHOT" })
     }
 
     @Test

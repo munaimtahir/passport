@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.assertIsDisplayed
@@ -55,7 +56,7 @@ class WealthCaptureDeviceTest {
 
         val liabilityName = "Device Liability ${UUID.randomUUID().toString().take(8)}"
         composeRule.onAllNodesWithText("Add", useUnmergedTree = true)[0].performClick()
-        composeRule.onNodeWithText("LIAB", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("wealth-mode-LIABILITY", useUnmergedTree = true).performClick()
         val liabilityFields = composeRule.onAllNodes(hasSetTextAction())
         liabilityFields[0].performTextInput(liabilityName)
         liabilityFields[1].performTextInput("10000")
@@ -71,8 +72,8 @@ class WealthCaptureDeviceTest {
 
         val goalName = "Device Goal ${UUID.randomUUID().toString().take(8)}"
         composeRule.onAllNodesWithText("Add", useUnmergedTree = true)[0].performClick()
-        composeRule.onNodeWithText("GOAL", useUnmergedTree = true).performClick()
-        composeRule.onNodeWithText("PURC", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("wealth-mode-GOAL", useUnmergedTree = true).performScrollTo().performClick()
+        composeRule.onNodeWithTag("goal-type-PURCHASE", useUnmergedTree = true).performScrollTo().performClick()
         val goalFields = composeRule.onAllNodes(hasSetTextAction())
         goalFields[0].performTextInput(goalName)
         goalFields[1].performTextInput("1000")

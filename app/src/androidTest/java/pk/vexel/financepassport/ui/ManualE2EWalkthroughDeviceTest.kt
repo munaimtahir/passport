@@ -76,7 +76,7 @@ class ManualE2EWalkthroughDeviceTest {
 
         val liabilityName = "E2E Liability ${UUID.randomUUID().toString().take(8)}"
         composeRule.onAllNodesWithText("Add", useUnmergedTree = true)[0].performClick()
-        composeRule.onNodeWithText("LIAB", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("wealth-mode-LIABILITY", useUnmergedTree = true).performClick()
         val liabilityFields = composeRule.onAllNodes(hasSetTextAction())
         liabilityFields[0].performTextInput(liabilityName)
         liabilityFields[1].performTextInput("5000")
