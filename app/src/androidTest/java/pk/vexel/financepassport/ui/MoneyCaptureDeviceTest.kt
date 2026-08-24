@@ -1,7 +1,7 @@
 package pk.vexel.financepassport.ui
 
 import androidx.compose.ui.test.hasSetTextAction
-import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -14,6 +14,9 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
 import android.Manifest
 import android.os.Build
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -123,6 +126,47 @@ class MoneyCaptureDeviceTest {
     }
 
     @Test
+    fun activityFilterByTypeNarrowsVisibleList() {
+        unlockIfNeeded()
+        composeRule.onNodeWithText("Money", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("add-account", useUnmergedTree = true).performClick()
+
+        val accountName = "Filter Test Account ${UUID.randomUUID().toString().take(8)}"
+        composeRule.onNodeWithTag("account-name", useUnmergedTree = true).performTextInput(accountName)
+        composeRule.onNodeWithTag("account-amount", useUnmergedTree = true).performTextInput("500000")
+        composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
+        assertVisible(accountName)
+
+        val expenseDescription = "Filter test expense ${UUID.randomUUID().toString().take(6)}"
+        composeRule.onNodeWithText("Income / expense", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithText("Expense", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("money-event-amount", useUnmergedTree = true).performTextInput("5000")
+        composeRule.onNodeWithTag("money-event-description", useUnmergedTree = true).performTextInput(expenseDescription)
+        composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
+        assertVisible(expenseDescription)
+
+        val incomeDescription = "Filter test income ${UUID.randomUUID().toString().take(6)}"
+        composeRule.onNodeWithText("Income / expense", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithText("Record income", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithTag("money-event-amount", useUnmergedTree = true).performTextInput("6000")
+        composeRule.onNodeWithTag("money-event-description", useUnmergedTree = true).performTextInput(incomeDescription)
+        composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
+        assertVisible(incomeDescription)
+
+        // Chip clicks below set local Compose state synchronously (no repository write in the path),
+        // unlike every other interaction in this class — no fire-and-forget race to retry around.
+        composeRule.onNode(isVerticallyScrollable, useUnmergedTree = true).performScrollToNode(hasTestTag("activity-filter-EXPENSE"))
+        composeRule.onNodeWithTag("activity-filter-EXPENSE", useUnmergedTree = true).performClick()
+        assertVisible(expenseDescription)
+        assertNotVisible(incomeDescription)
+
+        composeRule.onNode(isVerticallyScrollable, useUnmergedTree = true).performScrollToNode(hasTestTag("activity-filter-ALL"))
+        composeRule.onNodeWithTag("activity-filter-ALL", useUnmergedTree = true).performClick()
+        assertVisible(incomeDescription)
+        assertVisible(expenseDescription)
+    }
+
+    @Test
     fun incomeWithoutIncomeSourcePickedStillSaves() {
         unlockIfNeeded()
         composeRule.onNodeWithText("Money", useUnmergedTree = true).performClick()
@@ -200,12 +244,20 @@ class MoneyCaptureDeviceTest {
      * still be in flight the instant this runs — a single scroll-then-assert without retry flaked
      * on the slower API 36 emulator even though the same single-shot check was fine on API 26.
      */
+    // Sprint 23's activity filter bar added a second, horizontally-scrollable region to the Money
+    // screen (same shape of ambiguity as the Sprint 19 Wealth tab row) — plain hasScrollAction()
+    // now matches both it and the vertical list and throws "found 2 nodes". Match on the vertical
+    // scroll axis specifically so this still resolves to exactly the list.
+    private val isVerticallyScrollable = SemanticsMatcher("isVerticallyScrollable") {
+        it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null
+    }
+
     private fun assertVisible(text: String, timeoutMillis: Long = 5_000) {
         val deadline = System.currentTimeMillis() + timeoutMillis
         var lastError: Throwable? = null
         while (System.currentTimeMillis() < deadline) {
             try {
-                composeRule.onNode(hasScrollAction(), useUnmergedTree = true).performScrollToNode(hasText(text))
+                composeRule.onNode(isVerticallyScrollable, useUnmergedTree = true).performScrollToNode(hasText(text))
                 composeRule.onNodeWithText(text, useUnmergedTree = true).assertIsDisplayed()
                 return
             } catch (error: AssertionError) {
@@ -214,5 +266,22 @@ class MoneyCaptureDeviceTest {
             }
         }
         throw lastError ?: AssertionError("Timed out waiting for '$text' to appear")
+    }
+
+    /**
+     * Confirms [text] does not appear anywhere in the current semantics tree. Used to prove a
+     * filter actually excludes a row (as opposed to it merely being scrolled off-screen): a
+     * client-side filter removes the row from the data list entirely, so unlike [assertVisible]
+     * there is nothing to scroll to — a bare fetchSemanticsNodes() check is sufficient here.
+     */
+    private fun assertNotVisible(text: String, timeoutMillis: Long = 2_000) {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (System.currentTimeMillis() < deadline) {
+            if (composeRule.onAllNodesWithText(text, useUnmergedTree = true).fetchSemanticsNodes().isEmpty()) return
+            Thread.sleep(100)
+        }
+        check(composeRule.onAllNodesWithText(text, useUnmergedTree = true).fetchSemanticsNodes().isEmpty()) {
+            "'$text' was still visible after filtering it out"
+        }
     }
 }
