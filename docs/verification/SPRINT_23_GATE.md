@@ -53,11 +53,18 @@ Confirmed visually:
   section correctly absent (no goals exist on a fresh install, and the section is conditional on
   `goalProgress.isNotEmpty()`).
 
-## Connected suite
+## Connected suite (post-merge, combined with Sprint 23b)
+
+Both Sprint 23 halves (Home rebalancing here, Money screen filter/date-range in
+`SPRINT_23_MONEY_GATE.md`) merged cleanly into `main` with no conflicts — they touch disjoint
+composables (`HomeScreen` vs `MoneyScreen`) in the same file. Ran the full combined regression
+suite after both merges landed:
 
 ```
+./gradlew :app:compileDebugKotlin      # BUILD SUCCESSFUL
+./gradlew test lint assembleDebugAndroidTest   # BUILD SUCCESSFUL, 104 actionable tasks
 ./gradlew :app:connectedDebugAndroidTest
 ```
-Result: PENDING — held back to avoid running instrumentation concurrently with the Sprint 23b
-(Money screen) fork's own `connectedDebugAndroidTest` run on the same single emulator
-(`emulator-5554`). Will run and record below once the device is free.
+Result: **67/67 tests passed, 0 failed, 0 skipped** on `Android_26_Test(AVD) - 8.0.0`
+(`emulator-5554`), BUILD SUCCESSFUL in 11m 7s. This is the full instrumentation suite, not a
+subset — Sprint 23 is fully verified with no regressions from either half.
