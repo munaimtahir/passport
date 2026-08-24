@@ -69,16 +69,16 @@ class RecurringDraftDeviceTest {
         // MainViewModel.addRecurringItem also writes via a fire-and-forget viewModelScope.launch,
         // not awaited by the dialog's confirm button — same race as the account save above.
         scrollToAndAssertVisible(title)
-        composeRule.onNodeWithText("Next draft reminder:", substring = true).assertIsDisplayed()
+        scrollToAndAssertVisible("Next draft reminder:", substring = true)
     }
 
-    private fun scrollToAndAssertVisible(text: String, timeoutMillis: Long = 5_000) {
+    private fun scrollToAndAssertVisible(text: String, timeoutMillis: Long = 5_000, substring: Boolean = false) {
         val deadline = System.currentTimeMillis() + timeoutMillis
         var lastError: Throwable? = null
         while (System.currentTimeMillis() < deadline) {
             try {
-                composeRule.onNode(hasScrollAction(), useUnmergedTree = true).performScrollToNode(hasText(text))
-                composeRule.onNodeWithText(text, useUnmergedTree = true).assertIsDisplayed()
+                composeRule.onNode(hasScrollAction(), useUnmergedTree = true).performScrollToNode(hasText(text, substring = substring))
+                composeRule.onNodeWithText(text, substring = substring, useUnmergedTree = true).assertIsDisplayed()
                 return
             } catch (error: AssertionError) {
                 lastError = error
