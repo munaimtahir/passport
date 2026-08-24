@@ -6,6 +6,8 @@ import android.graphics.Color
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -97,6 +99,7 @@ val LocalPrivacyMode = compositionLocalOf { false }
 fun PassportApp() {
     val application = LocalContext.current.applicationContext as PassportApplication
     val vm: MainViewModel = viewModel(factory = MainViewModelFactory(application.repository, application.preferences))
+    val fabAccounts by vm.accounts.collectAsState()
     var selected by rememberSaveable { mutableIntStateOf(0) }
     var showAdd by rememberSaveable { mutableStateOf(false) }
     var showMore by rememberSaveable { mutableStateOf(false) }
@@ -113,7 +116,7 @@ fun PassportApp() {
                     IconButton(onClick = { showMore = true }) { Icon(Icons.Default.MoreHoriz, "More") }
                 })
             },
-            floatingActionButton = { if (selected == 1) FloatingActionButton(onClick = { showAdd = true }) { Icon(Icons.Default.Add, "Add") } },
+            floatingActionButton = { if (selected == 1) FloatingActionButton(onClick = { showAdd = true }, modifier = Modifier.testTag("money-fab")) { Icon(Icons.Default.Add, "Add") } },
             bottomBar = { NavigationBar { destinations.forEachIndexed { index, destination -> NavigationBarItem(selected == index, { selected = index }, icon = { Icon(destination.icon, destination.label) }, label = { Text(destination.label) }) } } },
         ) { padding ->
             when (selected) {
@@ -125,7 +128,7 @@ fun PassportApp() {
                 else -> EmptyModuleScreen(destinations[selected].label, padding)
             }
         }
-        if (showAdd) AddAccountDialog(vm) { showAdd = false }
+        if (showAdd) AddEventDialog(vm, fabAccounts) { showAdd = false }
         if (showMore) MoreDialog(vm, application) { showMore = false }
         vm.errorMessage?.let { message ->
             AlertDialog(onDismissRequest = vm::clearError, title = { Text("Could not save") }, text = { Text(message) }, confirmButton = { TextButton(onClick = vm::clearError) { Text("OK") } })
@@ -206,6 +209,9 @@ private fun HomeScreen(vm: MainViewModel, application: PassportApplication, padd
     val readiness = pk.vexel.financepassport.core.model.calculateTaxReadiness(taxItems)
     var showCalendarAdd by rememberSaveable { mutableStateOf(false) }
     var rescheduleTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.CalendarItemEntity?>(null) }
+    var showQuickEvent by rememberSaveable { mutableStateOf(false) }
+    var showQuickTransfer by rememberSaveable { mutableStateOf(false) }
+    var showQuickAsset by rememberSaveable { mutableStateOf(false) }
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item { Text("Your financial passport", style = MaterialTheme.typography.headlineSmall) }
         item {
@@ -238,13 +244,15 @@ private fun HomeScreen(vm: MainViewModel, application: PassportApplication, padd
         item { Text("Quick add", style = MaterialTheme.typography.titleLarge) }
         item {
             Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { onNavigate(1) }, modifier = Modifier.weight(1f)) { Text("Income / expense") }
-                OutlinedButton(onClick = { onNavigate(1) }, modifier = Modifier.weight(1f)) { Text("Transfer") }
+                // Falls back to switching to Money when there's no account yet — an income/expense
+                // or transfer dialog with nothing to pick from is worse than the existing nav shortcut.
+                OutlinedButton(onClick = { if (accounts.isNotEmpty()) showQuickEvent = true else onNavigate(1) }, modifier = Modifier.weight(1f).testTag("quick-add-event")) { Text("Income / expense") }
+                OutlinedButton(onClick = { if (accounts.size >= 2) showQuickTransfer = true else onNavigate(1) }, modifier = Modifier.weight(1f).testTag("quick-add-transfer")) { Text("Transfer") }
             }
         }
         item {
             Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { onNavigate(2) }, modifier = Modifier.weight(1f)) { Text("Asset") }
+                OutlinedButton(onClick = { showQuickAsset = true }, modifier = Modifier.weight(1f).testTag("quick-add-asset")) { Text("Asset") }
                 OutlinedButton(onClick = { onNavigate(3) }, modifier = Modifier.weight(1f)) { Text("Tax item") }
                 OutlinedButton(onClick = { onNavigate(4) }, modifier = Modifier.weight(1f)) { Text("Document") }
             }
@@ -267,6 +275,9 @@ private fun HomeScreen(vm: MainViewModel, application: PassportApplication, padd
     }
     if (showCalendarAdd) CalendarItemDialog(vm, application) { showCalendarAdd = false }
     rescheduleTarget?.let { reminder -> RescheduleDialog(reminder, vm, application) { rescheduleTarget = null } }
+    if (showQuickEvent) AddEventDialog(vm, accounts) { showQuickEvent = false }
+    if (showQuickTransfer) TransferDialog(vm, accounts) { showQuickTransfer = false }
+    if (showQuickAsset) AddWealthDialog(vm) { showQuickAsset = false }
 }
 
 @Composable
@@ -290,10 +301,11 @@ private fun MoneyScreen(vm: MainViewModel, application: PassportApplication, pad
     var showEvent by rememberSaveable { mutableStateOf(false) }
     var showTransfer by rememberSaveable { mutableStateOf(false) }
     var showRecurring by rememberSaveable { mutableStateOf(false) }
+    var showAddAccount by rememberSaveable { mutableStateOf(false) }
     var editAccount by remember { mutableStateOf<AccountEntity?>(null) }
     LazyColumn(Modifier.fillMaxSize().padding(padding).testTag("money-list"), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("Money", style = MaterialTheme.typography.headlineMedium) }
-        item { Text("Accounts", style = MaterialTheme.typography.titleLarge) }
+        item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Accounts", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showAddAccount = true }, modifier = Modifier.testTag("add-account")) { Text("Add account") } } }
         if (accounts.isEmpty()) item { Text("No accounts yet. Use + to add cash or a bank account.") }
         items(accounts, key = { it.id }) { account -> AccountCard(account, vm, onEdit = { editAccount = account }, onArchive = { vm.archiveAccount(account.id) }) }
         item { Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) { Button(onClick = { showEvent = true }, enabled = accounts.isNotEmpty(), modifier = Modifier.weight(1f)) { Text("Income / expense") }; Button(onClick = { showTransfer = true }, enabled = accounts.size >= 2, modifier = Modifier.weight(1f)) { Text("Transfer") } } }
@@ -306,6 +318,7 @@ private fun MoneyScreen(vm: MainViewModel, application: PassportApplication, pad
     if (showEvent) AddEventDialog(vm, accounts) { showEvent = false }
     if (showTransfer) TransferDialog(vm, accounts) { showTransfer = false }
     if (showRecurring) RecurringItemDialog(vm, application, accounts) { showRecurring = false }
+    if (showAddAccount) AddAccountDialog(vm) { showAddAccount = false }
     editAccount?.let { account -> EditAccountDialog(account, vm, onDismiss = { editAccount = null }) }
 }
 
@@ -459,7 +472,7 @@ private fun OfficialRecordDialog(vm: MainViewModel, application: PassportApplica
 
 @Composable private fun ManualTaxItemDialog(vm: MainViewModel, onDismiss: () -> Unit) {
     var type by rememberSaveable { mutableStateOf("OTHER_INCOME") }; var description by rememberSaveable { mutableStateOf("") }; var amount by rememberSaveable { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add tax item") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedTextField(type, { type = it.uppercase() }, label = { Text("Tax event type") }, singleLine = true); OutlinedTextField(description, { description = it }, label = { Text("What happened?") }, singleLine = true); OutlinedTextField(amount, { PkrMoneyInput.groupedInput(it)?.let { value -> amount = value } }, label = { Text("Amount (PKR)") }, singleLine = true); Text("This stays a source fact until reviewed; evidence can be attached later.", style = MaterialTheme.typography.bodySmall) } }, confirmButton = { Button(onClick = { vm.addManualTaxItem(type, PkrMoneyInput.toMinorUnits(amount, false), description); onDismiss() }, enabled = description.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess && type.isNotBlank()) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add tax item") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedTextField(type, { type = it.uppercase() }, label = { Text("Tax event type") }, singleLine = true); OutlinedTextField(description, { description = it }, label = { Text("What happened?") }, singleLine = true); AmountField(amount, { amount = it }, "Amount (PKR)"); Text("This stays a source fact until reviewed; evidence can be attached later.", style = MaterialTheme.typography.bodySmall) } }, confirmButton = { Button(onClick = { vm.addManualTaxItem(type, PkrMoneyInput.toMinorUnits(amount, false), description); onDismiss() }, enabled = description.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess && type.isNotBlank()) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable private fun FilingDeadlineDialog(vm: MainViewModel, application: PassportApplication, taxYearId: String, onDismiss: () -> Unit) {
@@ -556,13 +569,25 @@ private fun AddWealthDialog(vm: MainViewModel, onDismiss: () -> Unit) {
     var hasTargetDate by rememberSaveable { mutableStateOf(false) }
     var targetDate by rememberSaveable { mutableStateOf(java.time.LocalDate.now()) }
     val needsSecondary = mode == "RECEIVABLE"
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add ${mode.lowercase()}") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) { listOf("ASSET", "LIABILITY", "INVESTMENT", "RECEIVABLE", "GOAL").forEach { option -> OutlinedButton(onClick = { mode = option }, modifier = Modifier.testTag("wealth-mode-$option")) { Text(option.take(4)) } } }; OutlinedTextField(title, { title = it }, label = { Text(if (mode == "INVESTMENT") "Security" else "Name") }, singleLine = true); if (mode == "INVESTMENT") { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) { listOf("BUY", "SELL", "DIVIDEND", "PROFIT", "FEE").forEach { option -> OutlinedButton(onClick = { investmentType = option }, modifier = Modifier.testTag("investment-type-$option")) { Text(option.take(4)) } } }; OutlinedTextField(investmentAccount, { investmentAccount = it }, label = { Text("Broker / account (optional)") }, singleLine = true); OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit) }, label = { Text("Quantity (optional)") }, singleLine = true) }; if (needsSecondary) { OutlinedTextField(secondary, { secondary = it }, label = { Text("Counterparty") }, singleLine = true); OutlinedButton(onClick = { hasDueDate = !hasDueDate }) { Text(if (hasDueDate) "Remove due date" else "Set due date + reminder") }; if (hasDueDate) DateField("Due date", dueDate, { dueDate = it }) }; if (mode == "GOAL") { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) { listOf("EMERGENCY_FUND", "PURCHASE", "DEBT_PAYOFF", "CUSTOM").forEach { option -> OutlinedButton(onClick = { goalType = option }, modifier = Modifier.testTag("goal-type-$option")) { Text(option.take(4)) } } } }; OutlinedTextField(amount, { PkrMoneyInput.groupedInput(it)?.let { value -> amount = value } }, label = { Text("Amount / target (PKR)") }, singleLine = true); if (mode == "GOAL") { OutlinedButton(onClick = { hasTargetDate = !hasTargetDate }) { Text(if (hasTargetDate) "Remove target date" else "Set target date") }; if (hasTargetDate) DateField("Target date", targetDate, { targetDate = it }) } } }, confirmButton = { Button(onClick = { val value = PkrMoneyInput.toMinorUnits(amount, false); when (mode) { "ASSET" -> vm.addAsset(title, value); "LIABILITY" -> vm.addLiability(title, value); "INVESTMENT" -> vm.addInvestmentEvent(title, investmentType, value, quantity.toLongOrNull() ?: 0, investmentAccount.takeIf { it.isNotBlank() } ?: "Manual"); "RECEIVABLE" -> vm.addReceivable(context, title, secondary, value, dueDate.takeIf { hasDueDate }); "GOAL" -> vm.addGoal(title, value, goalType, if (hasTargetDate) targetDate else null) }; onDismiss() }, enabled = title.isNotBlank() && (!needsSecondary || secondary.isNotBlank()) && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add ${mode.lowercase()}") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) { listOf("ASSET", "LIABILITY", "INVESTMENT", "RECEIVABLE", "GOAL").forEach { option -> OutlinedButton(onClick = { mode = option }, modifier = Modifier.testTag("wealth-mode-$option")) { Text(option.take(4)) } } }; OutlinedTextField(title, { title = it }, label = { Text(if (mode == "INVESTMENT") "Security" else "Name") }, singleLine = true); if (mode == "INVESTMENT") { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) { listOf("BUY", "SELL", "DIVIDEND", "PROFIT", "FEE").forEach { option -> OutlinedButton(onClick = { investmentType = option }, modifier = Modifier.testTag("investment-type-$option")) { Text(option.take(4)) } } }; OutlinedTextField(investmentAccount, { investmentAccount = it }, label = { Text("Broker / account (optional)") }, singleLine = true); OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit) }, label = { Text("Quantity (optional)") }, singleLine = true) }; if (needsSecondary) { OutlinedTextField(secondary, { secondary = it }, label = { Text("Counterparty") }, singleLine = true); OutlinedButton(onClick = { hasDueDate = !hasDueDate }) { Text(if (hasDueDate) "Remove due date" else "Set due date + reminder") }; if (hasDueDate) DateField("Due date", dueDate, { dueDate = it }) }; if (mode == "GOAL") { Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) { listOf("EMERGENCY_FUND", "PURCHASE", "DEBT_PAYOFF", "CUSTOM").forEach { option -> OutlinedButton(onClick = { goalType = option }, modifier = Modifier.testTag("goal-type-$option")) { Text(option.take(4)) } } } }; AmountField(amount, { amount = it }, "Amount / target (PKR)"); if (mode == "GOAL") { OutlinedButton(onClick = { hasTargetDate = !hasTargetDate }) { Text(if (hasTargetDate) "Remove target date" else "Set target date") }; if (hasTargetDate) DateField("Target date", targetDate, { targetDate = it }) } } }, confirmButton = { Button(onClick = { val value = PkrMoneyInput.toMinorUnits(amount, false); when (mode) { "ASSET" -> vm.addAsset(title, value); "LIABILITY" -> vm.addLiability(title, value); "INVESTMENT" -> vm.addInvestmentEvent(title, investmentType, value, quantity.toLongOrNull() ?: 0, investmentAccount.takeIf { it.isNotBlank() } ?: "Manual"); "RECEIVABLE" -> vm.addReceivable(context, title, secondary, value, dueDate.takeIf { hasDueDate }); "GOAL" -> vm.addGoal(title, value, goalType, if (hasTargetDate) targetDate else null) }; onDismiss() }, enabled = title.isNotBlank() && (!needsSecondary || secondary.isNotBlank()) && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+}
+
+@Composable
+private fun AmountField(value: String, onValueChange: (String) -> Unit, label: String, modifier: Modifier = Modifier) {
+    OutlinedTextField(
+        value,
+        { PkrMoneyInput.groupedInput(it)?.let(onValueChange) },
+        label = { Text(label) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = modifier,
+    )
 }
 
 @Composable
 private fun AmountDialog(title: String, label: String, onDismiss: () -> Unit, onConfirm: (Long) -> Unit) {
     var amount by rememberSaveable { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = { OutlinedTextField(amount, { PkrMoneyInput.groupedInput(it)?.let { value -> amount = value } }, label = { Text(label) }, singleLine = true) }, confirmButton = { Button(onClick = { onConfirm(PkrMoneyInput.parseRupees(amount, false)) }, enabled = runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = { AmountField(amount, { amount = it }, label) }, confirmButton = { Button(onClick = { onConfirm(PkrMoneyInput.parseRupees(amount, false)) }, enabled = runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable
@@ -671,19 +696,21 @@ internal fun renderDocumentPreview(application: PassportApplication, document: p
 @Composable private fun AddAccountDialog(vm: MainViewModel, onDismiss: () -> Unit) {
     var name by rememberSaveable { mutableStateOf("") }; var amount by rememberSaveable { mutableStateOf("") }
     var institution by rememberSaveable { mutableStateOf("") }; var notes by rememberSaveable { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add account") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedTextField(name, { name = it }, label = { Text("Account name") }, singleLine = true, modifier = Modifier.testTag("account-name")); OutlinedTextField(institution, { institution = it }, label = { Text("Institution (optional)") }, singleLine = true, modifier = Modifier.testTag("account-institution")); OutlinedTextField(amount, { PkrMoneyInput.groupedInput(it)?.let { value -> amount = value } }, label = { Text("Opening balance (PKR)") }, singleLine = true, modifier = Modifier.testTag("account-amount")); OutlinedTextField(notes, { notes = it }, label = { Text("Notes (optional)") }, singleLine = true, modifier = Modifier.testTag("account-notes")) } }, confirmButton = { Button(onClick = { vm.addAccount(name, "OTHER", PkrMoneyInput.toMinorUnits(amount), institution.takeIf { it.isNotBlank() }, notes.takeIf { it.isNotBlank() }); onDismiss() }, enabled = name.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(amount) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add account") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedTextField(name, { name = it }, label = { Text("Account name") }, singleLine = true, modifier = Modifier.testTag("account-name")); OutlinedTextField(institution, { institution = it }, label = { Text("Institution (optional)") }, singleLine = true, modifier = Modifier.testTag("account-institution")); AmountField(amount, { amount = it }, "Opening balance (PKR)", modifier = Modifier.testTag("account-amount")); OutlinedTextField(notes, { notes = it }, label = { Text("Notes (optional)") }, singleLine = true, modifier = Modifier.testTag("account-notes")) } }, confirmButton = { Button(onClick = { vm.addAccount(name, "OTHER", PkrMoneyInput.toMinorUnits(amount), institution.takeIf { it.isNotBlank() }, notes.takeIf { it.isNotBlank() }); onDismiss() }, enabled = name.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(amount) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable private fun EditAccountDialog(account: AccountEntity, vm: MainViewModel, onDismiss: () -> Unit) {
     var name by rememberSaveable { mutableStateOf(account.name) }; var amount by rememberSaveable { mutableStateOf((account.openingBalanceMinor / 100).toString()) }
     var institution by rememberSaveable { mutableStateOf(account.institution.orEmpty()) }; var notes by rememberSaveable { mutableStateOf(account.notes.orEmpty()) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Edit account") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedTextField(name, { name = it }, label = { Text("Account name") }, singleLine = true); OutlinedTextField(institution, { institution = it }, label = { Text("Institution (optional)") }, singleLine = true); OutlinedTextField(amount, { PkrMoneyInput.groupedInput(it)?.let { value -> amount = value } }, label = { Text("Opening balance (PKR)") }, singleLine = true); OutlinedTextField(notes, { notes = it }, label = { Text("Notes (optional)") }, singleLine = true) } }, confirmButton = { Button(onClick = { vm.updateAccount(account.id, name, PkrMoneyInput.toMinorUnits(amount), institution.takeIf { it.isNotBlank() }, notes.takeIf { it.isNotBlank() }); onDismiss() }, enabled = name.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(amount) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Edit account") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedTextField(name, { name = it }, label = { Text("Account name") }, singleLine = true); OutlinedTextField(institution, { institution = it }, label = { Text("Institution (optional)") }, singleLine = true); AmountField(amount, { amount = it }, "Opening balance (PKR)"); OutlinedTextField(notes, { notes = it }, label = { Text("Notes (optional)") }, singleLine = true) } }, confirmButton = { Button(onClick = { vm.updateAccount(account.id, name, PkrMoneyInput.toMinorUnits(amount), institution.takeIf { it.isNotBlank() }, notes.takeIf { it.isNotBlank() }); onDismiss() }, enabled = name.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(amount) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable private fun AddEventDialog(vm: MainViewModel, accounts: List<AccountEntity>, onDismiss: () -> Unit) {
     var amount by rememberSaveable { mutableStateOf("") }; var description by rememberSaveable { mutableStateOf("") }; var category by rememberSaveable { mutableStateOf("") }; var income by rememberSaveable { mutableStateOf(true) }; var accountId by rememberSaveable { mutableStateOf(accounts.firstOrNull()?.id.orEmpty()) }
     var date by rememberSaveable { mutableStateOf(java.time.LocalDate.now()) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (income) "Record income" else "Record expense") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton({ income = true }) { Text("Income") }; OutlinedButton({ income = false }) { Text("Expense") } }; AccountPicker("Account", accounts, accountId) { accountId = it }; DateField("Date", date, { date = it }, testTag = "money-event-date"); OutlinedTextField(amount, { PkrMoneyInput.groupedInput(it)?.let { value -> amount = value } }, label = { Text("Amount (PKR)") }, singleLine = true, modifier = Modifier.testTag("money-event-amount")); OutlinedTextField(description, { description = it }, label = { Text("What happened?") }, singleLine = true, modifier = Modifier.testTag("money-event-description")); OutlinedTextField(category, { category = it }, label = { Text("Category (optional)") }, singleLine = true, modifier = Modifier.testTag("money-event-category")) } }, confirmButton = { Button(onClick = { vm.addEvent(if (income) FinancialEventType.INCOME else FinancialEventType.EXPENSE, PkrMoneyInput.toMinorUnits(amount, false), accountId, description, category, date); onDismiss() }, enabled = accountId.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess && description.isNotBlank()) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    val recentEvents by vm.recentEvents.collectAsState()
+    val categorySuggestions = remember(recentEvents) { recentEvents.mapNotNull { it.category }.filter { it.isNotBlank() }.distinct().take(8) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (income) "Record income" else "Record expense") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton({ income = true }) { Text("Income") }; OutlinedButton({ income = false }) { Text("Expense") } }; AccountPicker("Account", accounts, accountId) { accountId = it }; DateField("Date", date, { date = it }, testTag = "money-event-date"); AmountField(amount, { amount = it }, "Amount (PKR)", modifier = Modifier.testTag("money-event-amount")); OutlinedTextField(description, { description = it }, label = { Text("What happened? (optional)") }, singleLine = true, modifier = Modifier.testTag("money-event-description")); OutlinedTextField(category, { category = it }, label = { Text("Category (optional)") }, singleLine = true, modifier = Modifier.testTag("money-event-category")); if (categorySuggestions.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) { categorySuggestions.forEach { suggestion -> OutlinedButton(onClick = { category = suggestion }, modifier = Modifier.testTag("category-chip-$suggestion")) { Text(suggestion) } } } } }, confirmButton = { Button(onClick = { vm.addEvent(if (income) FinancialEventType.INCOME else FinancialEventType.EXPENSE, PkrMoneyInput.toMinorUnits(amount, false), accountId, description, category, date); onDismiss() }, enabled = accountId.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable
@@ -702,7 +729,7 @@ private fun RecurringItemDialog(vm: MainViewModel, application: PassportApplicat
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton({ income = true }) { Text("Income") }; OutlinedButton({ income = false }) { Text("Expense") } }
             OutlinedTextField(title, { title = it }, label = { Text("Title") }, singleLine = true, modifier = Modifier.testTag("recurring-title"))
             AccountPicker("Account", accounts, accountId) { accountId = it }
-            OutlinedTextField(amount, { PkrMoneyInput.groupedInput(it)?.let { value -> amount = value } }, label = { Text("Amount (PKR)") }, singleLine = true, modifier = Modifier.testTag("recurring-amount"))
+            AmountField(amount, { amount = it }, "Amount (PKR)", modifier = Modifier.testTag("recurring-amount"))
             OutlinedTextField(category, { category = it }, label = { Text("Category (optional)") }, singleLine = true, modifier = Modifier.testTag("recurring-category"))
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { listOf("WEEKLY", "MONTHLY", "QUARTERLY", "YEARLY").forEach { option -> OutlinedButton({ frequency = option }) { Text(option.take(3)) } } }
             OutlinedTextField(delayDays, { delayDays = it.filter(Char::isDigit) }, label = { Text("First reminder in days") }, singleLine = true, modifier = Modifier.testTag("recurring-delay"))
@@ -716,7 +743,7 @@ private fun RecurringItemDialog(vm: MainViewModel, application: PassportApplicat
 @Composable private fun TransferDialog(vm: MainViewModel, accounts: List<AccountEntity>, onDismiss: () -> Unit) {
     var amount by rememberSaveable { mutableStateOf("") }; var description by rememberSaveable { mutableStateOf("") }; var sourceId by rememberSaveable { mutableStateOf(accounts.getOrNull(0)?.id.orEmpty()) }; var destinationId by rememberSaveable { mutableStateOf(accounts.getOrNull(1)?.id.orEmpty()) }
     var date by rememberSaveable { mutableStateOf(java.time.LocalDate.now()) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Transfer between accounts") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { AccountPicker("From account", accounts, sourceId) { sourceId = it }; AccountPicker("To account", accounts, destinationId) { destinationId = it }; DateField("Date", date, { date = it }); OutlinedTextField(amount, { PkrMoneyInput.groupedInput(it)?.let { value -> amount = value } }, label = { Text("Amount (PKR)") }, singleLine = true); OutlinedTextField(description, { description = it }, label = { Text("Reason") }, singleLine = true) } }, confirmButton = { Button(onClick = { vm.transfer(sourceId, destinationId, PkrMoneyInput.toMinorUnits(amount, false), description, date); onDismiss() }, enabled = sourceId.isNotBlank() && destinationId.isNotBlank() && sourceId != destinationId && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess && description.isNotBlank()) { Text("Transfer") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Transfer between accounts") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { AccountPicker("From account", accounts, sourceId) { sourceId = it }; AccountPicker("To account", accounts, destinationId) { destinationId = it }; DateField("Date", date, { date = it }); AmountField(amount, { amount = it }, "Amount (PKR)"); OutlinedTextField(description, { description = it }, label = { Text("Reason") }, singleLine = true) } }, confirmButton = { Button(onClick = { vm.transfer(sourceId, destinationId, PkrMoneyInput.toMinorUnits(amount, false), description, date); onDismiss() }, enabled = sourceId.isNotBlank() && destinationId.isNotBlank() && sourceId != destinationId && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess && description.isNotBlank()) { Text("Transfer") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable private fun EmptyModuleScreen(label: String, padding: PaddingValues) { Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), Arrangement.spacedBy(12.dp)) { Text(label, style = MaterialTheme.typography.headlineMedium); Text("This workspace is next in the build sequence. Your existing local records are preserved.") } }

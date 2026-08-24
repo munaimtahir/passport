@@ -112,7 +112,7 @@ class SecurityLifecycleDeviceTest {
     fun rotationPreservesInFlightAddAccountDialogFields() {
         unlockIfNeeded()
         composeRule.onNodeWithText("Money", useUnmergedTree = true).performClick()
-        composeRule.onNodeWithContentDescription("Add").performClick()
+        composeRule.onNodeWithTag("add-account", useUnmergedTree = true).performClick()
 
         val accountName = "Rotation ${UUID.randomUUID().toString().take(8)}"
         composeRule.onNodeWithTag("account-name", useUnmergedTree = true).performTextInput(accountName)

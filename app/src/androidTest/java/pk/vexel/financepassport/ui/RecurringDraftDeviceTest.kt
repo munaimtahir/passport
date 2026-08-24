@@ -46,7 +46,7 @@ class RecurringDraftDeviceTest {
         unlockIfNeeded()
         composeRule.onNodeWithText("Money", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Recurring drafts", useUnmergedTree = true).assertIsDisplayed()
-        composeRule.onNodeWithContentDescription("Add").performClick()
+        composeRule.onNodeWithTag("add-account", useUnmergedTree = true).performClick()
         composeRule.onNodeWithTag("account-name", useUnmergedTree = true).performTextInput("Recurring Test Account")
         composeRule.onNodeWithTag("account-amount", useUnmergedTree = true).performTextInput("100000")
         composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()

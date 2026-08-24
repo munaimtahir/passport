@@ -50,7 +50,7 @@ class ManualE2EWalkthroughDeviceTest {
 
         // Money: account + income event
         composeRule.onNodeWithText("Money", useUnmergedTree = true).performClick()
-        composeRule.onNodeWithContentDescription("Add").performClick()
+        composeRule.onNodeWithTag("add-account", useUnmergedTree = true).performClick()
         val accountName = "E2E Account ${UUID.randomUUID().toString().take(8)}"
         composeRule.onNodeWithTag("account-name", useUnmergedTree = true).performTextInput(accountName)
         composeRule.onNodeWithTag("account-amount", useUnmergedTree = true).performTextInput("50000")
