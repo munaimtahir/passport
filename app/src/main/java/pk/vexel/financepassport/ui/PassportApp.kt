@@ -48,6 +48,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SecondaryScrollableTabRow
 import androidx.compose.material3.Tab
@@ -312,6 +313,16 @@ private fun MoneyScreen(vm: MainViewModel, application: PassportApplication, pad
     var showRecurring by rememberSaveable { mutableStateOf(false) }
     var showAddAccount by rememberSaveable { mutableStateOf(false) }
     var editAccount by remember { mutableStateOf<AccountEntity?>(null) }
+    var activityFilterType by rememberSaveable { mutableStateOf("ALL") }
+    var activityDateRangeEnabled by rememberSaveable { mutableStateOf(false) }
+    var activityDateFrom by rememberSaveable { mutableStateOf(java.time.LocalDate.now().minusMonths(1)) }
+    var activityDateTo by rememberSaveable { mutableStateOf(java.time.LocalDate.now()) }
+    val filteredEvents = remember(recentEvents, activityFilterType, activityDateRangeEnabled, activityDateFrom, activityDateTo) {
+        recentEvents.filter { event ->
+            (activityFilterType == "ALL" || event.eventType == activityFilterType) &&
+                (!activityDateRangeEnabled || event.dateEpochDay in activityDateFrom.toEpochDay()..activityDateTo.toEpochDay())
+        }
+    }
     LazyColumn(Modifier.fillMaxSize().padding(padding).testTag("money-list"), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item { Text("Money", style = MaterialTheme.typography.headlineMedium) }
         item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Accounts", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showAddAccount = true }, modifier = Modifier.testTag("add-account")) { Text("Add account") } } }
@@ -324,7 +335,33 @@ private fun MoneyScreen(vm: MainViewModel, application: PassportApplication, pad
         if (incomeBySource.isNotEmpty()) item { Text("Income by source", style = MaterialTheme.typography.titleLarge) }
         items(incomeBySource, key = { (source, _) -> "income-source-$source" }) { (source, totalMinor) -> Card(Modifier.fillMaxWidth().testTag("income-by-source-row")) { Row(Modifier.padding(16.dp), Arrangement.SpaceBetween) { Text(source); Text(MaskedPkr(totalMinor)) } } }
         item { Text("Activity", style = MaterialTheme.typography.titleLarge) }
-        items(recentEvents, key = { it.id }) { event -> Card(Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp), Arrangement.SpaceBetween) { Column { Text(event.description); Text(listOfNotNull(event.eventType, event.category).joinToString(" · "), style = MaterialTheme.typography.labelSmall) }; Text(MaskedPkr(event.amountMinor)) } } }
+        item {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("activity-filter-bar"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("ALL", "INCOME", "EXPENSE", "TRANSFER").forEach { type ->
+                    FilterChip(
+                        selected = activityFilterType == type,
+                        onClick = { activityFilterType = type },
+                        label = { Text(type) },
+                        modifier = Modifier.testTag("activity-filter-$type"),
+                    )
+                }
+            }
+        }
+        item {
+            Column(Modifier.fillMaxWidth()) {
+                TextButton(onClick = { activityDateRangeEnabled = !activityDateRangeEnabled }, modifier = Modifier.testTag("activity-date-range-toggle")) {
+                    Text(if (activityDateRangeEnabled) "Remove date range" else "Filter by date range")
+                }
+                if (activityDateRangeEnabled) {
+                    Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) {
+                        DateField("From", activityDateFrom, { activityDateFrom = it }, modifier = Modifier.weight(1f), testTag = "activity-date-from")
+                        DateField("To", activityDateTo, { activityDateTo = it }, modifier = Modifier.weight(1f), testTag = "activity-date-to")
+                    }
+                }
+            }
+        }
+        if (filteredEvents.isEmpty()) item { Text("No activity matches these filters.") }
+        items(filteredEvents, key = { it.id }) { event -> Card(Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp), Arrangement.SpaceBetween) { Column { Text(event.description); Text(listOfNotNull(event.eventType, event.category).joinToString(" · "), style = MaterialTheme.typography.labelSmall) }; Text(MaskedPkr(event.amountMinor)) } } }
     }
     if (showEvent) AddEventDialog(vm, accounts) { showEvent = false }
     if (showTransfer) TransferDialog(vm, accounts) { showTransfer = false }

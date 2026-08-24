@@ -1,6 +1,5 @@
 package pk.vexel.financepassport.ui
 
-import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -15,6 +14,9 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.SemanticsMatcher
 import android.Manifest
 import android.os.Build
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -63,7 +65,7 @@ class RecurringDraftDeviceTest {
         // writes via a fire-and-forget viewModelScope.launch, not awaited by the dialog's confirm
         // button, so the Room insert + Flow re-emission can genuinely still be in flight here.
         scrollToAndAssertVisible("Recurring Test Account")
-        composeRule.onNode(hasScrollAction(), useUnmergedTree = true).performScrollToNode(hasTestTag("add-recurring"))
+        composeRule.onNode(isVerticallyScrollable, useUnmergedTree = true).performScrollToNode(hasTestTag("add-recurring"))
         composeRule.onNodeWithTag("add-recurring", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Add recurring draft", useUnmergedTree = true).assertIsDisplayed()
 
@@ -88,7 +90,7 @@ class RecurringDraftDeviceTest {
         composeRule.onNodeWithTag("account-amount", useUnmergedTree = true).performTextInput("100000")
         composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
         scrollToAndAssertVisible("Mark Paid Account")
-        composeRule.onNode(hasScrollAction(), useUnmergedTree = true).performScrollToNode(hasTestTag("add-recurring"))
+        composeRule.onNode(isVerticallyScrollable, useUnmergedTree = true).performScrollToNode(hasTestTag("add-recurring"))
         composeRule.onNodeWithTag("add-recurring", useUnmergedTree = true).performClick()
 
         val title = "Electricity bill ${UUID.randomUUID().toString().take(8)}"
@@ -135,12 +137,20 @@ class RecurringDraftDeviceTest {
         error("Recurring item titled '$title' was not persisted within 5s")
     }
 
+    // Sprint 23's Money-screen activity filter bar added a second, horizontally-scrollable region
+    // (same shape of ambiguity as the Sprint 19 Wealth tab row) — plain hasScrollAction() now
+    // matches both it and the vertical list and throws "found 2 nodes". Match on the vertical
+    // scroll axis specifically so this still resolves to exactly the list.
+    private val isVerticallyScrollable = SemanticsMatcher("isVerticallyScrollable") {
+        it.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange) != null
+    }
+
     private fun scrollToAndAssertVisible(text: String, timeoutMillis: Long = 5_000, substring: Boolean = false) {
         val deadline = System.currentTimeMillis() + timeoutMillis
         var lastError: Throwable? = null
         while (System.currentTimeMillis() < deadline) {
             try {
-                composeRule.onNode(hasScrollAction(), useUnmergedTree = true).performScrollToNode(hasText(text, substring = substring))
+                composeRule.onNode(isVerticallyScrollable, useUnmergedTree = true).performScrollToNode(hasText(text, substring = substring))
                 composeRule.onNodeWithText(text, substring = substring, useUnmergedTree = true).assertIsDisplayed()
                 return
             } catch (error: AssertionError) {
