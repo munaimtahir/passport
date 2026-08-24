@@ -828,3 +828,40 @@ Manual, screenshot-based — not automated, no test file added.**
   font scale or in landscape was not additionally captured this pass).
 - Emulator state (font scale, rotation, TalkBack) was reset to defaults and the app's data cleared
   before this pass ended.
+
+## Phase 11 — Item 5: Guided onboarding + finance-diary welcome copy
+
+Built in an isolated worktree in parallel with other Phase 11 items (tax-mapping lineage UI, tax
+issue types) landing separately on main.
+
+**Landed:**
+- `Onboarding.kt` welcome copy rewritten to lead with the finance-diary framing (daily expenses,
+  bills, income, loans, receivables, savings, net worth), mentioning Continuous Tax Capture once,
+  last, as a supporting benefit — matching the language already committed in `docs/00_README.md`
+  and `CLAUDE.md`. The old copy calling out "accounts, wealth, documents and continuous tax
+  capture" as co-equal is gone.
+- A new optional guided-setup step (`GuidedSetupPage`) inserted between the informational pages
+  and PIN creation: add a bank account, cash account, investment account, or a major asset — each
+  calling the existing `FinanceRepository.addAccount`/`addAsset` via `MainViewModel` (no new
+  repository methods) — or an explicit "Start empty" that skips straight past. Every step is
+  skippable/reversible via Back. **No seeded/demo data option was built**, per explicit product
+  decision — every record this screen can create is real, user-entered, or nothing.
+- Updated the `dismissOnboardingIfPresent()`-style helper in six existing instrumentation tests
+  (`NavigationSmokeTest`, `MoneyCaptureDeviceTest`, `RecurringDraftDeviceTest`,
+  `WealthCaptureDeviceTest`, `ManualE2EWalkthroughDeviceTest`, `UiDrivenBackupRestoreDeviceTest`)
+  to also dismiss the new guided-setup step (tap "Start empty") after the informational pages,
+  since it now sits in the same position their helpers were already navigating past.
+- New `OnboardingDeviceTest.kt`: welcome copy assertions (new framing present, old co-equal phrase
+  absent), "Start empty" reaches the app shell with no accounts created, adding a bank account via
+  guided setup persists a real account visible on the Money screen, and Back navigation from
+  guided setup returns to the informational pages. Written defensively for the shared-process
+  connectedAndroidTest run (each test short-circuits if onboarding was already completed by an
+  earlier test class in the same run, matching the pattern already used elsewhere in this suite).
+
+**Verification:** `./gradlew test lint assembleDebugAndroidTest` — BUILD SUCCESSFUL (all existing
+JVM tests green, no lint regressions, full androidTest sources including the new/updated files
+compile). **Not run on a device this pass** — no emulator was available/idle at verification time
+(host machine under load from parallel Phase 11 work elsewhere) — deferred per the same
+load-avoidance approach used earlier in this remediation run. Follow-up:
+`./gradlew :app:connectedDebugAndroidTest --tests "*Onboarding*"` plus a full-suite rerun (to
+confirm the six updated helpers didn't regress their own tests) once a device is free.
