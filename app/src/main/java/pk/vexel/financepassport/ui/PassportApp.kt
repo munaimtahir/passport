@@ -317,6 +317,7 @@ private fun TaxScreen(vm: MainViewModel, application: PassportApplication, paddi
     val taxYears by vm.taxYears.collectAsState()
     var showOfficialRecord by rememberSaveable { mutableStateOf(false) }
     var showManualTaxItem by rememberSaveable { mutableStateOf(false) }
+    var showFilingDeadline by rememberSaveable { mutableStateOf(false) }
     var reviewTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.TaxItemEntity?>(null) }
     var draftLines by remember { mutableStateOf<List<pk.vexel.financepassport.core.database.TaxDraftLineEntity>?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
@@ -352,6 +353,7 @@ private fun TaxScreen(vm: MainViewModel, application: PassportApplication, paddi
                 }
             }
         }
+        item { OutlinedButton(onClick = { showFilingDeadline = true }, modifier = Modifier.fillMaxWidth()) { Text("Set filing deadline reminder") } }
         item { Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) { Button(onClick = { showManualTaxItem = true }, modifier = Modifier.weight(1f)) { Text("Add tax item") }; Button(onClick = { vm.prepareAnnualDraft() }, modifier = Modifier.weight(1f)) { Text("Prepare draft") } } }
         if (vm.draftMessage != null) item { Text(vm.draftMessage!!, color = MaterialTheme.colorScheme.primary) }
         item { Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = { vm.recordWealthSnapshot("OPENING") }, modifier = Modifier.weight(1f)) { Text("Record opening snapshot") }; OutlinedButton(onClick = { vm.recordWealthSnapshot("CLOSING") }, modifier = Modifier.weight(1f)) { Text("Record closing snapshot") } } }
@@ -377,6 +379,7 @@ private fun TaxScreen(vm: MainViewModel, application: PassportApplication, paddi
     }
     if (showOfficialRecord) OfficialRecordDialog(vm, application) { showOfficialRecord = false }
     if (showManualTaxItem) ManualTaxItemDialog(vm) { showManualTaxItem = false }
+    if (showFilingDeadline) FilingDeadlineDialog(vm, application, vm.selectedTaxYearId) { showFilingDeadline = false }
     reviewTarget?.let { item -> TaxReviewDialog(item, vm) { reviewTarget = null } }
     draftLines?.let { lines ->
         AlertDialog(onDismissRequest = { draftLines = null }, title = { Text("Draft calculation lines") }, text = { LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) { if (lines.isEmpty()) item { Text("No generated lines.") }; items(lines, key = { it.id }) { line -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) { Text("${line.sectionCode} / ${line.categoryCode}", style = MaterialTheme.typography.titleSmall); Text("Amount ${formatPkr(line.amountMinor)} · sources ${line.sourceIdsJson}"); Text(line.calculation, style = MaterialTheme.typography.bodySmall) } } } }, confirmButton = { TextButton(onClick = { draftLines = null }) { Text("Close") } })
@@ -426,6 +429,16 @@ private fun OfficialRecordDialog(vm: MainViewModel, application: PassportApplica
     AlertDialog(onDismissRequest = onDismiss, title = { Text("Add tax item") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedTextField(type, { type = it.uppercase() }, label = { Text("Tax event type") }, singleLine = true); OutlinedTextField(description, { description = it }, label = { Text("What happened?") }, singleLine = true); OutlinedTextField(amount, { PkrMoneyInput.groupedInput(it)?.let { value -> amount = value } }, label = { Text("Amount (PKR)") }, singleLine = true); Text("This stays a source fact until reviewed; evidence can be attached later.", style = MaterialTheme.typography.bodySmall) } }, confirmButton = { Button(onClick = { vm.addManualTaxItem(type, PkrMoneyInput.toMinorUnits(amount, false), description); onDismiss() }, enabled = description.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess && type.isNotBlank()) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
+@Composable private fun FilingDeadlineDialog(vm: MainViewModel, application: PassportApplication, taxYearId: String, onDismiss: () -> Unit) {
+    var hasDeadline by rememberSaveable { mutableStateOf(true) }
+    var deadline by rememberSaveable { mutableStateOf(java.time.LocalDate.now().plusMonths(3)) }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Filing deadline for $taxYearId") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("A one-time reminder, not an FBR deadline lookup — set the date that applies to you.", style = MaterialTheme.typography.bodySmall)
+        OutlinedButton(onClick = { hasDeadline = !hasDeadline }) { Text(if (hasDeadline) "Clear reminder" else "Set a deadline") }
+        if (hasDeadline) DateField("Deadline", deadline, { deadline = it })
+    } }, confirmButton = { Button(onClick = { vm.scheduleTaxFilingDeadlineReminder(application, deadline.takeIf { hasDeadline }); onDismiss() }) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+}
+
 @Composable
 private fun WealthScreen(vm: MainViewModel, padding: PaddingValues) {
     val assets by vm.assets.collectAsState()
@@ -465,7 +478,7 @@ private fun WealthScreen(vm: MainViewModel, padding: PaddingValues) {
         items(investments, key = { it.id }) { event -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text("${event.securityName} · ${event.investmentAccountId}", style = MaterialTheme.typography.titleMedium); Text("${event.type} · ${MaskedPkr(event.grossAmountMinor)}") } } }
         item { Text("Receivables", style = MaterialTheme.typography.titleLarge) }
         if (receivables.isEmpty()) item { Text("No receivables yet.") }
-        items(receivables, key = { it.id }) { value -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(value.title, style = MaterialTheme.typography.titleMedium); Text("${value.counterparty} · outstanding ${MaskedPkr(value.outstandingAmountMinor)} of ${MaskedPkr(value.originalAmountMinor)}"); if (value.outstandingAmountMinor > 0) TextButton(onClick = { receivablePaymentTarget = value }) { Text("Record receipt") } } } }
+        items(receivables, key = { it.id }) { value -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(value.title, style = MaterialTheme.typography.titleMedium); Text("${value.counterparty} · outstanding ${MaskedPkr(value.outstandingAmountMinor)} of ${MaskedPkr(value.originalAmountMinor)}"); value.dueDateEpochDay?.let { Text("Due ${java.time.LocalDate.ofEpochDay(it)}", style = MaterialTheme.typography.bodySmall) }; if (value.outstandingAmountMinor > 0) TextButton(onClick = { receivablePaymentTarget = value }) { Text("Record receipt") } } } }
         item { Text("Goals", style = MaterialTheme.typography.titleLarge) }
         if (goals.isEmpty()) item { Text("No goals yet.") }
         items(goals, key = { it.id }) { goal -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text(goal.title, style = MaterialTheme.typography.titleMedium); Text("Target ${MaskedPkr(goal.targetAmountMinor)}") } } }
@@ -479,6 +492,7 @@ private fun WealthScreen(vm: MainViewModel, padding: PaddingValues) {
 
 @Composable
 private fun AddWealthDialog(vm: MainViewModel, onDismiss: () -> Unit) {
+    val context = LocalContext.current
     var mode by rememberSaveable { mutableStateOf("ASSET") }
     var title by rememberSaveable { mutableStateOf("") }
     var secondary by rememberSaveable { mutableStateOf("") }
@@ -486,8 +500,10 @@ private fun AddWealthDialog(vm: MainViewModel, onDismiss: () -> Unit) {
     var quantity by rememberSaveable { mutableStateOf("") }
     var investmentType by rememberSaveable { mutableStateOf("BUY") }
     var investmentAccount by rememberSaveable { mutableStateOf("") }
+    var hasDueDate by rememberSaveable { mutableStateOf(false) }
+    var dueDate by rememberSaveable { mutableStateOf(java.time.LocalDate.now().plusMonths(1)) }
     val needsSecondary = mode == "RECEIVABLE"
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add ${mode.lowercase()}") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { listOf("ASSET", "LIABILITY", "INVESTMENT", "RECEIVABLE", "GOAL").forEach { option -> OutlinedButton(onClick = { mode = option }) { Text(option.take(4)) } } }; OutlinedTextField(title, { title = it }, label = { Text(if (mode == "INVESTMENT") "Security" else "Name") }, singleLine = true); if (mode == "INVESTMENT") { Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { listOf("BUY", "SELL", "DIVIDEND", "PROFIT", "FEE").forEach { option -> OutlinedButton(onClick = { investmentType = option }) { Text(option.take(4)) } } }; OutlinedTextField(investmentAccount, { investmentAccount = it }, label = { Text("Broker / account (optional)") }, singleLine = true); OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit) }, label = { Text("Quantity (optional)") }, singleLine = true) }; if (needsSecondary) OutlinedTextField(secondary, { secondary = it }, label = { Text("Counterparty") }, singleLine = true); OutlinedTextField(amount, { PkrMoneyInput.groupedInput(it)?.let { value -> amount = value } }, label = { Text("Amount / target (PKR)") }, singleLine = true) } }, confirmButton = { Button(onClick = { val value = PkrMoneyInput.toMinorUnits(amount, false); when (mode) { "ASSET" -> vm.addAsset(title, value); "LIABILITY" -> vm.addLiability(title, value); "INVESTMENT" -> vm.addInvestmentEvent(title, investmentType, value, quantity.toLongOrNull() ?: 0, investmentAccount.takeIf { it.isNotBlank() } ?: "Manual"); "RECEIVABLE" -> vm.addReceivable(title, secondary, value); "GOAL" -> vm.addGoal(title, value) }; onDismiss() }, enabled = title.isNotBlank() && (!needsSecondary || secondary.isNotBlank()) && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add ${mode.lowercase()}") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { listOf("ASSET", "LIABILITY", "INVESTMENT", "RECEIVABLE", "GOAL").forEach { option -> OutlinedButton(onClick = { mode = option }) { Text(option.take(4)) } } }; OutlinedTextField(title, { title = it }, label = { Text(if (mode == "INVESTMENT") "Security" else "Name") }, singleLine = true); if (mode == "INVESTMENT") { Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) { listOf("BUY", "SELL", "DIVIDEND", "PROFIT", "FEE").forEach { option -> OutlinedButton(onClick = { investmentType = option }) { Text(option.take(4)) } } }; OutlinedTextField(investmentAccount, { investmentAccount = it }, label = { Text("Broker / account (optional)") }, singleLine = true); OutlinedTextField(quantity, { quantity = it.filter(Char::isDigit) }, label = { Text("Quantity (optional)") }, singleLine = true) }; if (needsSecondary) { OutlinedTextField(secondary, { secondary = it }, label = { Text("Counterparty") }, singleLine = true); OutlinedButton(onClick = { hasDueDate = !hasDueDate }) { Text(if (hasDueDate) "Remove due date" else "Set due date + reminder") }; if (hasDueDate) DateField("Due date", dueDate, { dueDate = it }) }; OutlinedTextField(amount, { PkrMoneyInput.groupedInput(it)?.let { value -> amount = value } }, label = { Text("Amount / target (PKR)") }, singleLine = true) } }, confirmButton = { Button(onClick = { val value = PkrMoneyInput.toMinorUnits(amount, false); when (mode) { "ASSET" -> vm.addAsset(title, value); "LIABILITY" -> vm.addLiability(title, value); "INVESTMENT" -> vm.addInvestmentEvent(title, investmentType, value, quantity.toLongOrNull() ?: 0, investmentAccount.takeIf { it.isNotBlank() } ?: "Manual"); "RECEIVABLE" -> vm.addReceivable(context, title, secondary, value, dueDate.takeIf { hasDueDate }); "GOAL" -> vm.addGoal(title, value) }; onDismiss() }, enabled = title.isNotBlank() && (!needsSecondary || secondary.isNotBlank()) && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable

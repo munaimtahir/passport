@@ -14,8 +14,9 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class AppDatabaseTest {
+    private val context = InstrumentationRegistry.getInstrumentation().targetContext
     private val database = Room.inMemoryDatabaseBuilder(
-        InstrumentationRegistry.getInstrumentation().targetContext,
+        context,
         AppDatabase::class.java,
     ).allowMainThreadQueries().build()
 
@@ -59,7 +60,7 @@ class AppDatabaseTest {
         repository.recordLiabilityPayment(liability.id, 250_000)
         assertEquals(750_000L, database.wealthDao().getLiabilityById(liability.id)?.outstandingAmountMinor)
 
-        repository.addReceivable("Advance", "Friend", 500_000)
+        repository.addReceivable(context, "Advance", "Friend", 500_000)
         val receivable = database.receivableDao().getAll().single()
         repository.recordReceivablePayment(receivable.id, 125_000)
         assertEquals(375_000L, database.receivableDao().getById(receivable.id)?.outstandingAmountMinor)
@@ -221,7 +222,7 @@ class AppDatabaseTest {
         ))
         repository.addAsset("Car", "VEHICLE", 800_000)
         repository.addLiability("Loan", "PERSONAL", 200_000)
-        repository.addReceivable("Advance", "Friend", 50_000)
+        repository.addReceivable(context, "Advance", "Friend", 50_000)
 
         val position = repository.financialPosition.first()
         assertEquals(100_000L + 25_000L, position.liquidFundsMinor)
@@ -362,6 +363,45 @@ class AppDatabaseTest {
 
         repository.updateTaxYearStatus("PK-2028", "OPEN") // reopen from filed
         assertEquals("OPEN", database.taxYearDao().getById("PK-2028")?.status)
+    }
+
+    /**
+     * Phase 11: receivable due dates never wired to a reminder before — ReceivableEntity's
+     * dueDateEpochDay column existed but nothing ever set it. Proves a due date on a new
+     * receivable creates a real, correctly-kinded calendar reminder, and that clearing it (a
+     * second receivable added with no due date) does not create a stray entry.
+     */
+    @Test
+    fun receivableDueDateSchedulesACalendarReminder() = runBlocking {
+        val repository = FinanceRepository(database)
+        repository.addReceivable(context, "Advance", "Friend", 500_000, java.time.LocalDate.of(2027, 3, 1))
+        val open = database.calendarDao().observeOpen().first()
+        val reminder = open.single { it.kind == "RECEIVABLE_DUE" }
+        assertEquals("Advance is due", reminder.title)
+        val receivableId = database.receivableDao().getAll().single { it.title == "Advance" }.id
+        assertEquals(receivableId, reminder.linkedEntityId)
+        assertEquals(java.time.LocalDate.of(2027, 3, 1).toEpochDay(), receivableId.let { database.receivableDao().getById(it)?.dueDateEpochDay })
+
+        repository.addReceivable(context, "No due date", "Other friend", 10_000)
+        assertEquals(1, database.calendarDao().observeOpen().first().count { it.kind == "RECEIVABLE_DUE" })
+    }
+
+    /**
+     * Phase 11: filing-deadline reminders are independent of tax-year status transitions — a user
+     * can set one at any point, and clearing it (passing null) cancels the calendar entry rather
+     * than leaving a stale reminder behind.
+     */
+    @Test
+    fun taxFilingDeadlineReminderCanBeSetAndCleared() = runBlocking {
+        val repository = FinanceRepository(database)
+        repository.prepareAnnualDraft(2028) // creates the PK-2028 tax_years row
+        repository.scheduleTaxFilingDeadlineReminder(context, "PK-2028", java.time.LocalDate.of(2028, 9, 30))
+        var open = database.calendarDao().observeOpen().first()
+        assertEquals(1, open.count { it.kind == "TAX_FILING_DEADLINE" && it.linkedEntityId == "PK-2028" })
+
+        repository.scheduleTaxFilingDeadlineReminder(context, "PK-2028", null)
+        open = database.calendarDao().observeOpen().first()
+        assertEquals(0, open.count { it.kind == "TAX_FILING_DEADLINE" })
     }
 
     @Test

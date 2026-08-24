@@ -169,8 +169,29 @@ class FinanceRepository(private val db: AppDatabase) {
         db.investmentDao().insert(InvestmentEventEntity(UUID.randomUUID().toString(), normalizedAccountLabel, securityName.trim(), type, LocalDate.now().toEpochDay(), quantityMinor, amountMinor, feesMinor, taxWithheldMinor, "PKR"))
     }
 
-    suspend fun addReceivable(title: String, counterparty: String, amountMinor: Long) {
-        db.receivableDao().upsert(ReceivableEntity(UUID.randomUUID().toString(), title.trim(), counterparty.trim(), amountMinor, amountMinor, null, "OPEN"))
+    suspend fun addReceivable(context: Context, title: String, counterparty: String, amountMinor: Long, dueDate: LocalDate? = null) {
+        val id = UUID.randomUUID().toString()
+        val trimmedTitle = title.trim()
+        db.receivableDao().upsert(ReceivableEntity(id, trimmedTitle, counterparty.trim(), amountMinor, amountMinor, dueDate?.toEpochDay(), "OPEN"))
+        if (dueDate != null) {
+            scheduleOrCancelExpiryReminder(
+                context, "receivable-due-$id", "RECEIVABLE_DUE", trimmedTitle, id, dueDate.toEpochDay(),
+                headline = "$trimmedTitle is due", body = "Follow up with ${counterparty.trim()} about this receivable.",
+            )
+        }
+    }
+
+    /**
+     * Schedules (or cancels, if [deadline] is null) a filing-deadline reminder for a tax year —
+     * mega-prompt 5F's other calendar-integration gap alongside receivable due dates. Not tied to
+     * any particular status transition ([updateTaxYearStatus] is independent) since a user may
+     * want the reminder well before actually starting review.
+     */
+    suspend fun scheduleTaxFilingDeadlineReminder(context: Context, taxYearId: String, deadline: LocalDate?) {
+        scheduleOrCancelExpiryReminder(
+            context, "tax-filing-deadline-$taxYearId", "TAX_FILING_DEADLINE", taxYearId, taxYearId, deadline?.toEpochDay(),
+            headline = "$taxYearId filing deadline", body = "Prepare and file your $taxYearId return before this date.",
+        )
     }
 
     suspend fun recordReceivablePayment(id: String, amountMinor: Long) {
@@ -398,12 +419,21 @@ class FinanceRepository(private val db: AppDatabase) {
         File(document.localEncryptedPath).delete()
     }
 
-    /** Schedules (or, if [expiryDateEpochDay] is null, cancels) a persisted calendar reminder tied to an expiring document/official record. */
-    private suspend fun scheduleOrCancelExpiryReminder(context: Context, calendarId: String, kind: String, title: String, linkedEntityId: String?, expiryDateEpochDay: Long?) {
-        if (expiryDateEpochDay != null) {
-            val dueAt = LocalDate.ofEpochDay(expiryDateEpochDay).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-            db.calendarDao().upsert(CalendarItemEntity(calendarId, "$title is expiring", kind, dueAt, linkedEntityId, "OPEN", 0))
-            ReminderScheduler(context).schedule(calendarId, dueAt, 0, "$title is expiring", "Review and renew this record before it expires.")
+    /** Schedules (or, if [dueDateEpochDay] is null, cancels) a persisted calendar reminder tied to a due-dated record. [headline]/[body] default to expiry wording (the original, still most common caller); pass both explicitly for a reminder that isn't about something expiring. */
+    private suspend fun scheduleOrCancelExpiryReminder(
+        context: Context,
+        calendarId: String,
+        kind: String,
+        title: String,
+        linkedEntityId: String?,
+        dueDateEpochDay: Long?,
+        headline: String = "$title is expiring",
+        body: String = "Review and renew this record before it expires.",
+    ) {
+        if (dueDateEpochDay != null) {
+            val dueAt = LocalDate.ofEpochDay(dueDateEpochDay).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            db.calendarDao().upsert(CalendarItemEntity(calendarId, headline, kind, dueAt, linkedEntityId, "OPEN", 0))
+            ReminderScheduler(context).schedule(calendarId, dueAt, 0, headline, body)
         } else {
             db.calendarDao().updateStatus(calendarId, "CANCELLED")
             ReminderScheduler(context).cancel(calendarId)

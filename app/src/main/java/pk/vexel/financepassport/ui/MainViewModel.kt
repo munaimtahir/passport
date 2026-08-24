@@ -70,7 +70,8 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     fun addLiability(title: String, valueMinor: Long) = write { repository.addLiability(title, "OTHER", valueMinor) }
     fun recordLiabilityPayment(id: String, amountMinor: Long) = write { repository.recordLiabilityPayment(id, amountMinor) }
     fun addInvestmentEvent(security: String, type: String, amountMinor: Long, quantityMinor: Long = 0, accountLabel: String = "Manual") = write { repository.addInvestmentEvent(security, type, amountMinor, quantityMinor, accountLabel = accountLabel) }
-    fun addReceivable(title: String, counterparty: String, amountMinor: Long) = write { repository.addReceivable(title, counterparty, amountMinor) }
+    fun addReceivable(context: android.content.Context, title: String, counterparty: String, amountMinor: Long, dueDate: LocalDate? = null) = write { repository.addReceivable(context, title, counterparty, amountMinor, dueDate) }
+    fun scheduleTaxFilingDeadlineReminder(context: android.content.Context, deadline: LocalDate?) = write { repository.scheduleTaxFilingDeadlineReminder(context, selectedTaxYearId, deadline) }
     fun recordReceivablePayment(id: String, amountMinor: Long) = write { repository.recordReceivablePayment(id, amountMinor) }
     fun addGoal(title: String, targetMinor: Long) = write { repository.addGoal(title, targetMinor) }
     fun addOfficialRecord(context: android.content.Context, type: String, title: String, identifier: String?, issueDate: LocalDate? = null, expiryDate: LocalDate? = null) = write { repository.addOfficialRecord(context, type, title, identifier, issueDate, expiryDate) }
