@@ -300,6 +300,13 @@ private fun MoneyScreen(vm: MainViewModel, application: PassportApplication, pad
     val accounts by vm.accounts.collectAsState()
     val recentEvents by vm.recentEvents.collectAsState()
     val recurringItems by vm.recurringItems.collectAsState()
+    val incomeSources by vm.incomeSources.collectAsState()
+    val incomeBySource = remember(recentEvents, incomeSources) {
+        recentEvents.filter { it.eventType == "INCOME" }
+            .groupBy { event -> incomeSources.firstOrNull { it.id == event.incomeSourceId }?.name ?: "Unassigned" }
+            .mapValues { (_, events) -> events.sumOf { it.amountMinor } }
+            .entries.sortedByDescending { it.value }
+    }
     var showEvent by rememberSaveable { mutableStateOf(false) }
     var showTransfer by rememberSaveable { mutableStateOf(false) }
     var showRecurring by rememberSaveable { mutableStateOf(false) }
@@ -314,6 +321,8 @@ private fun MoneyScreen(vm: MainViewModel, application: PassportApplication, pad
         item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Bills & Recurring", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showRecurring = true }, enabled = accounts.isNotEmpty(), modifier = Modifier.testTag("add-recurring")) { Text("Add") } } }
         if (recurringItems.isEmpty()) item { Text("No bills or recurring items yet. Add one to receive a reminder without silently creating a confirmed event.") }
         items(recurringItems, key = { it.id }) { recurring -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text(recurring.title, style = MaterialTheme.typography.titleMedium); Text(listOfNotNull(recurring.eventType, recurring.category).joinToString(" · ") + " · ${MaskedPkr(recurring.amountMinor)} · ${recurring.frequency}"); Text("Next due: ${java.time.LocalDate.ofEpochDay(recurring.nextDueDateEpochDay)}"); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = { vm.confirmRecurringItemNow(application, recurring.id) }, modifier = Modifier.testTag("mark-paid-${recurring.id}")) { Text("Mark paid") }; TextButton(onClick = { vm.pauseRecurringItem(application, recurring.id) }) { Text("Pause") } } } } }
+        if (incomeBySource.isNotEmpty()) item { Text("Income by source", style = MaterialTheme.typography.titleLarge) }
+        items(incomeBySource, key = { (source, _) -> "income-source-$source" }) { (source, totalMinor) -> Card(Modifier.fillMaxWidth().testTag("income-by-source-row")) { Row(Modifier.padding(16.dp), Arrangement.SpaceBetween) { Text(source); Text(MaskedPkr(totalMinor)) } } }
         item { Text("Activity", style = MaterialTheme.typography.titleLarge) }
         items(recentEvents, key = { it.id }) { event -> Card(Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp), Arrangement.SpaceBetween) { Column { Text(event.description); Text(listOfNotNull(event.eventType, event.category).joinToString(" · "), style = MaterialTheme.typography.labelSmall) }; Text(MaskedPkr(event.amountMinor)) } } }
     }
@@ -740,9 +749,13 @@ internal fun renderDocumentPreview(application: PassportApplication, document: p
 @Composable private fun AddEventDialog(vm: MainViewModel, accounts: List<AccountEntity>, onDismiss: () -> Unit) {
     var amount by rememberSaveable { mutableStateOf("") }; var description by rememberSaveable { mutableStateOf("") }; var category by rememberSaveable { mutableStateOf("") }; var income by rememberSaveable { mutableStateOf(true) }; var accountId by rememberSaveable { mutableStateOf(accounts.firstOrNull()?.id.orEmpty()) }
     var date by rememberSaveable { mutableStateOf(java.time.LocalDate.now()) }
+    var incomeSourceId by rememberSaveable { mutableStateOf<String?>(null) }
+    var showNewIncomeSource by rememberSaveable { mutableStateOf(false) }
+    var newIncomeSourceName by rememberSaveable { mutableStateOf("") }
     val recentEvents by vm.recentEvents.collectAsState()
+    val incomeSources by vm.incomeSources.collectAsState()
     val categorySuggestions = remember(recentEvents) { recentEvents.mapNotNull { it.category }.filter { it.isNotBlank() }.distinct().take(8) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (income) "Record income" else "Record expense") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton({ income = true }) { Text("Income") }; OutlinedButton({ income = false }) { Text("Expense") } }; AccountPicker("Account", accounts, accountId) { accountId = it }; DateField("Date", date, { date = it }, testTag = "money-event-date"); AmountField(amount, { amount = it }, "Amount (PKR)", modifier = Modifier.testTag("money-event-amount")); OutlinedTextField(description, { description = it }, label = { Text("What happened? (optional)") }, singleLine = true, modifier = Modifier.testTag("money-event-description")); OutlinedTextField(category, { category = it }, label = { Text("Category (optional)") }, singleLine = true, modifier = Modifier.testTag("money-event-category")); if (categorySuggestions.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) { categorySuggestions.forEach { suggestion -> OutlinedButton(onClick = { category = suggestion }, modifier = Modifier.testTag("category-chip-$suggestion")) { Text(suggestion) } } } } }, confirmButton = { Button(onClick = { vm.addEvent(if (income) FinancialEventType.INCOME else FinancialEventType.EXPENSE, PkrMoneyInput.toMinorUnits(amount, false), accountId, description, category, date); onDismiss() }, enabled = accountId.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (income) "Record income" else "Record expense") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton({ income = true }) { Text("Income") }; OutlinedButton({ income = false }) { Text("Expense") } }; AccountPicker("Account", accounts, accountId) { accountId = it }; DateField("Date", date, { date = it }, testTag = "money-event-date"); AmountField(amount, { amount = it }, "Amount (PKR)", modifier = Modifier.testTag("money-event-amount")); OutlinedTextField(description, { description = it }, label = { Text("What happened? (optional)") }, singleLine = true, modifier = Modifier.testTag("money-event-description")); OutlinedTextField(category, { category = it }, label = { Text("Category (optional)") }, singleLine = true, modifier = Modifier.testTag("money-event-category")); if (categorySuggestions.isNotEmpty()) Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) { categorySuggestions.forEach { suggestion -> OutlinedButton(onClick = { category = suggestion }, modifier = Modifier.testTag("category-chip-$suggestion")) { Text(suggestion) } } }; if (income) { IncomeSourcePicker(incomeSources, incomeSourceId) { incomeSourceId = it }; if (showNewIncomeSource) { OutlinedTextField(newIncomeSourceName, { newIncomeSourceName = it }, label = { Text("New source name") }, singleLine = true, modifier = Modifier.testTag("new-income-source-name")); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Button(onClick = { vm.addIncomeSource(newIncomeSourceName, "OTHER"); showNewIncomeSource = false; newIncomeSourceName = "" }, enabled = newIncomeSourceName.isNotBlank(), modifier = Modifier.testTag("save-new-income-source")) { Text("Add source") }; TextButton(onClick = { showNewIncomeSource = false; newIncomeSourceName = "" }) { Text("Cancel") } } } else TextButton(onClick = { showNewIncomeSource = true }, modifier = Modifier.testTag("add-new-income-source")) { Text("+ New income source") } } } }, confirmButton = { Button(onClick = { vm.addEvent(if (income) FinancialEventType.INCOME else FinancialEventType.EXPENSE, PkrMoneyInput.toMinorUnits(amount, false), accountId, description, category, date, if (income) incomeSourceId else null); onDismiss() }, enabled = accountId.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(amount, false) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable
@@ -785,6 +798,20 @@ private fun formatPkr(minor: Long): String = PkrMoneyInput.formatMinorUnits(mino
 /** Privacy-aware amount rendering: shows masked placeholders instead of the value while [LocalPrivacyMode] is enabled. */
 @Composable
 private fun MaskedPkr(minor: Long): String = if (LocalPrivacyMode.current) "PKR ••••••" else formatPkr(minor)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun IncomeSourcePicker(sources: List<pk.vexel.financepassport.core.database.IncomeSourceEntity>, selectedId: String?, onSelected: (String?) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    val selected = sources.firstOrNull { it.id == selectedId }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
+        OutlinedTextField(selected?.name.orEmpty(), {}, readOnly = true, label = { Text("Income source (optional)") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) }, modifier = Modifier.menuAnchor().fillMaxWidth().testTag("income-source-picker"))
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DropdownMenuItem(text = { Text("None") }, onClick = { onSelected(null); expanded = false }, modifier = Modifier.testTag("income-source-none"))
+            sources.forEach { source -> DropdownMenuItem(text = { Text(source.name) }, onClick = { onSelected(source.id); expanded = false }, modifier = Modifier.testTag("income-source-${source.id}")) }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

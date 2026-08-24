@@ -64,6 +64,83 @@ class MoneyCaptureDeviceTest {
         assertVisible("INCOME · Salary")
     }
 
+    @Test
+    fun incomeSourceCanBeAddedInlineAndAppearsInBreakdown() {
+        unlockIfNeeded()
+        composeRule.onNodeWithText("Money", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("add-account", useUnmergedTree = true).performClick()
+
+        val accountName = "Source Test Account ${UUID.randomUUID().toString().take(8)}"
+        composeRule.onNodeWithTag("account-name", useUnmergedTree = true).performTextInput(accountName)
+        composeRule.onNodeWithTag("account-amount", useUnmergedTree = true).performTextInput("50000")
+        composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
+        assertVisible(accountName)
+
+        composeRule.onNodeWithText("Income / expense", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithText("Record income", useUnmergedTree = true).assertIsDisplayed()
+        val sourceName = "Freelance ${UUID.randomUUID().toString().take(6)}"
+        composeRule.onNodeWithTag("add-new-income-source", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("new-income-source-name", useUnmergedTree = true).performTextInput(sourceName)
+        composeRule.onNodeWithTag("save-new-income-source", useUnmergedTree = true).performClick()
+        // FinanceRepository.addIncomeSource writes via a fire-and-forget viewModelScope.launch (same
+        // pattern as every other write in this repository) — the new source may not be selectable in
+        // the dropdown the instant the click returns. The dropdown's own contents only compose while
+        // it's expanded, so retry by opening it, checking, and closing again rather than a plain wait.
+        waitForOpenDropdownToContain("income-source-picker", sourceName)
+        composeRule.onNodeWithText(sourceName, useUnmergedTree = true).performClick()
+
+        composeRule.onNodeWithTag("money-event-amount", useUnmergedTree = true).performTextInput("75000")
+        composeRule.onNodeWithTag("money-event-description", useUnmergedTree = true).performTextInput("Freelance payout")
+        composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
+        assertVisible("Freelance payout")
+        assertVisible(sourceName)
+    }
+
+    @Test
+    fun incomeWithoutIncomeSourcePickedStillSaves() {
+        unlockIfNeeded()
+        composeRule.onNodeWithText("Money", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("add-account", useUnmergedTree = true).performClick()
+
+        val accountName = "No Source Account ${UUID.randomUUID().toString().take(8)}"
+        composeRule.onNodeWithTag("account-name", useUnmergedTree = true).performTextInput(accountName)
+        composeRule.onNodeWithTag("account-amount", useUnmergedTree = true).performTextInput("20000")
+        composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
+        assertVisible(accountName)
+
+        composeRule.onNodeWithText("Income / expense", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithText("Record income", useUnmergedTree = true).assertIsDisplayed()
+        // Deliberately never touch the income-source picker — source must stay optional.
+        val description = "Unassigned income ${UUID.randomUUID().toString().take(6)}"
+        composeRule.onNodeWithTag("money-event-amount", useUnmergedTree = true).performTextInput("15000")
+        composeRule.onNodeWithTag("money-event-description", useUnmergedTree = true).performTextInput(description)
+        composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
+        assertVisible(description)
+    }
+
+    /**
+     * Opens a dropdown-menu-box (by its own tag, e.g. income-source-picker) and checks for [text]
+     * among its items, retrying by closing and reopening if not found yet — the menu's contents
+     * only compose while expanded, so a plain retry-in-place isn't enough; each attempt needs a
+     * fresh open. Leaves the dropdown open on success so the caller can click the item immediately.
+     */
+    private fun waitForOpenDropdownToContain(pickerTag: String, text: String, timeoutMillis: Long = 5_000) {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        var lastError: Throwable? = null
+        while (System.currentTimeMillis() < deadline) {
+            composeRule.onNodeWithTag(pickerTag, useUnmergedTree = true).performClick()
+            try {
+                composeRule.onNodeWithText(text, useUnmergedTree = true).assertIsDisplayed()
+                return
+            } catch (error: AssertionError) {
+                lastError = error
+                composeRule.onNodeWithTag(pickerTag, useUnmergedTree = true).performClick()
+                Thread.sleep(200)
+            }
+        }
+        throw lastError ?: AssertionError("Timed out waiting for '$text' to appear in dropdown '$pickerTag'")
+    }
+
     private fun dismissOnboardingIfPresent() {
         while (composeRule.onAllNodesWithTag("onboarding-next").fetchSemanticsNodes().isNotEmpty()) {
             composeRule.onNodeWithTag("onboarding-next").performClick()
