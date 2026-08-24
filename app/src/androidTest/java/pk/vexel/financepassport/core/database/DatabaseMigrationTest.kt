@@ -120,4 +120,29 @@ class DatabaseMigrationTest {
             }
         }
     }
+
+    @Test
+    fun migrateV10ToV11AddsIncomeSourcesTableAndFinancialEventLink() {
+        helper.createDatabase("migration-v10", 10).apply {
+            execSQL("INSERT INTO accounts (id, name, institution, accountType, maskedIdentifier, encryptedSensitiveIdentifier, currency, openingBalanceMinor, openingBalanceDateEpochDay, status, notes, createdAtEpochMillis, updatedAtEpochMillis) VALUES ('acct-1', 'Salary account', NULL, 'BANK', NULL, NULL, 'PKR', 0, 0, 'ACTIVE', NULL, 1, 1)")
+            execSQL("INSERT INTO financial_events (id, eventType, dateEpochDay, amountMinor, currency, accountId, category, description, notes, taxRelevance, deletedAtEpochMillis, createdAtEpochMillis, updatedAtEpochMillis) VALUES ('event-1', 'INCOME', 0, 50000, 'PKR', 'acct-1', NULL, 'Pre-existing salary', NULL, 'UNKNOWN', NULL, 1, 1)")
+            close()
+        }
+
+        helper.runMigrationsAndValidate("migration-v10", 11, true, DatabaseProvider.MIGRATION_10_11).use { database ->
+            database.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'income_sources'").use { cursor ->
+                check(cursor.moveToFirst()) { "income_sources table must exist after migration" }
+            }
+            database.query("SELECT incomeSourceId FROM financial_events WHERE id = 'event-1'").use { cursor ->
+                cursor.moveToFirst()
+                check(cursor.isNull(0)) { "Pre-existing events must default incomeSourceId to NULL, not lose the row" }
+            }
+            database.execSQL("INSERT INTO income_sources (id, name, sourceType, payerOrEmployer, status, createdAtEpochMillis, updatedAtEpochMillis) VALUES ('src-1', 'Day job', 'EMPLOYMENT', 'Acme Co', 'ACTIVE', 1, 1)")
+            database.execSQL("UPDATE financial_events SET incomeSourceId = 'src-1' WHERE id = 'event-1'")
+            database.query("SELECT incomeSourceId FROM financial_events WHERE id = 'event-1'").use { cursor ->
+                cursor.moveToFirst()
+                check(cursor.getString(0) == "src-1") { "incomeSourceId must be settable against a real income source row" }
+            }
+        }
+    }
 }

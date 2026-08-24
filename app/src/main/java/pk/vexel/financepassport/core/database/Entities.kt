@@ -31,7 +31,7 @@ data class AccountEntity(
     val updatedAtEpochMillis: Long,
 )
 
-@Entity(tableName = "financial_events", indices = [Index("dateEpochDay"), Index("accountId")])
+@Entity(tableName = "financial_events", indices = [Index("dateEpochDay"), Index("accountId"), Index("incomeSourceId")])
 data class FinancialEventEntity(
     @PrimaryKey val id: String,
     val eventType: String,
@@ -44,6 +44,18 @@ data class FinancialEventEntity(
     val notes: String?,
     val taxRelevance: String,
     val deletedAtEpochMillis: Long?,
+    val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long,
+    val incomeSourceId: String? = null,
+)
+
+@Entity(tableName = "income_sources", indices = [Index("status")])
+data class IncomeSourceEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val sourceType: String,
+    val payerOrEmployer: String?,
+    val status: String,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
 )

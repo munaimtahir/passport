@@ -56,6 +56,7 @@ data class AccountBalance(val account: AccountEntity, val balance: Money)
 class FinanceRepository(private val db: AppDatabase) {
     internal val database: AppDatabase get() = db
     val accounts: Flow<List<AccountEntity>> = db.accountDao().observeActive()
+    val incomeSources: Flow<List<IncomeSourceEntity>> = db.incomeSourceDao().observeActive()
     val recentEvents: Flow<List<FinancialEventEntity>> = db.financialEventDao().observeRecent(200)
     val activeEventCount: Flow<Int> = db.financialEventDao().observeActiveCount()
     val taxItems: Flow<List<TaxItemEntity>> = db.taxItemDao().observeAll()
@@ -126,6 +127,20 @@ class FinanceRepository(private val db: AppDatabase) {
                 currency, openingBalanceMinor, LocalDate.now().toEpochDay(), "ACTIVE", notes?.trim()?.takeIf { it.isNotEmpty() }, now, now,
             ),
         )
+    }
+
+    suspend fun addIncomeSource(name: String, sourceType: String, payerOrEmployer: String? = null) {
+        require(name.isNotBlank()) { "Income source name is required" }
+        val now = Instant.now().toEpochMilli()
+        db.incomeSourceDao().upsert(
+            IncomeSourceEntity(
+                UUID.randomUUID().toString(), name.trim(), sourceType, payerOrEmployer?.trim()?.takeIf { it.isNotEmpty() }, "ACTIVE", now, now,
+            ),
+        )
+    }
+
+    suspend fun archiveIncomeSource(id: String) {
+        db.incomeSourceDao().archive(id, Instant.now().toEpochMilli())
     }
 
     suspend fun updateAccount(id: String, name: String, openingBalanceMinor: Long, institution: String? = null, notes: String? = null) {
@@ -267,12 +282,12 @@ class FinanceRepository(private val db: AppDatabase) {
         ReminderScheduler(context).schedule(id, dueAt, item.reminderMinutesBefore, item.title, "Open Vexel Finance Passport to review this obligation.")
     }
 
-    suspend fun addEvent(type: FinancialEventType, amountMinor: Long, accountId: String, description: String, category: String? = null, taxRelevance: String = "UNKNOWN", date: LocalDate = LocalDate.now()) {
+    suspend fun addEvent(type: FinancialEventType, amountMinor: Long, accountId: String, description: String, category: String? = null, taxRelevance: String = "UNKNOWN", date: LocalDate = LocalDate.now(), incomeSourceId: String? = null) {
         require(amountMinor > 0) { "Amount must be greater than zero" }
         require(db.accountDao().getById(accountId)?.status == "ACTIVE") { "Choose an active account" }
         val now = Instant.now().toEpochMilli()
         val eventId = UUID.randomUUID().toString()
-        val event = FinancialEventEntity(eventId, type.name, date.toEpochDay(), amountMinor, "PKR", accountId, category?.trim()?.takeIf { it.isNotEmpty() }, description.trim(), null, taxRelevance, null, now, now)
+        val event = FinancialEventEntity(eventId, type.name, date.toEpochDay(), amountMinor, "PKR", accountId, category?.trim()?.takeIf { it.isNotEmpty() }, description.trim(), null, taxRelevance, null, now, now, incomeSourceId.takeIf { type == FinancialEventType.INCOME })
         db.withTransaction {
             db.financialEventDao().upsert(event)
             if (type == FinancialEventType.INCOME) {
@@ -346,6 +361,7 @@ class FinanceRepository(private val db: AppDatabase) {
         db.taxItemDao().getAll(), db.documentDao().getAll(), db.investmentDao().getAll(), db.receivableDao().getAll(),
         db.goalDao().getAll(), db.officialRecordDao().getAll(), db.budgetDao().getAll(),
         db.taxMappingDao().getAll(), db.wealthSnapshotDao().getAll(), db.taxDraftDao().getAll(),
+        db.incomeSourceDao().getAll(),
     )
 
     suspend fun deleteAllData(context: Context) {
@@ -506,9 +522,9 @@ class FinanceRepository(private val db: AppDatabase) {
         val documents = allDocuments.map { document ->
             BackupFile("documents/${File(document.localEncryptedPath).name}", File(document.localEncryptedPath).readBytes())
         }
-        val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size
+        val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size + db.incomeSourceDao().getAll().size
         return try {
-            BackupPackageService().create(snapshotFile.readBytes(), documents, BuildConfig.VERSION_NAME, 10, password, recordCount, allDocuments.map { it.sha256 }, runCatching { pk.vexel.financepassport.core.taxrules.BundledTaxRulesets.loadDefault().version }.getOrNull()).payload
+            BackupPackageService().create(snapshotFile.readBytes(), documents, BuildConfig.VERSION_NAME, DATABASE_VERSION, password, recordCount, allDocuments.map { it.sha256 }, runCatching { pk.vexel.financepassport.core.taxrules.BundledTaxRulesets.loadDefault().version }.getOrNull()).payload
         } finally {
             snapshotFile.delete()
         }
@@ -530,8 +546,8 @@ class FinanceRepository(private val db: AppDatabase) {
             val documents = db.documentDao().getAll().map { document ->
                 BackupDiskFile("documents/${File(document.localEncryptedPath).name}", File(document.localEncryptedPath))
             }
-            val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size
-            BackupPackageService().createStreaming(snapshotFile, documents, BuildConfig.VERSION_NAME, 10, password, recordCount, output)
+            val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size + db.incomeSourceDao().getAll().size
+            BackupPackageService().createStreaming(snapshotFile, documents, BuildConfig.VERSION_NAME, DATABASE_VERSION, password, recordCount, output)
             return output
         } catch (failure: Throwable) {
             output.delete()
