@@ -64,6 +64,7 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     fun addEvent(type: FinancialEventType, amountMinor: Long, accountId: String, description: String, category: String? = null, date: LocalDate = LocalDate.now()) = write { repository.addEvent(type, amountMinor, accountId, description, category, date = date) }
     fun addRecurringItem(context: android.content.Context, title: String, type: FinancialEventType, amountMinor: Long, accountId: String, category: String?, frequency: String, delayDays: Long) = write { repository.addRecurringItem(context, title, type, amountMinor, accountId, category, frequency, delayDays) }
     fun pauseRecurringItem(context: android.content.Context, id: String) = write { repository.pauseRecurringItem(context, id) }
+    fun confirmRecurringItemNow(context: android.content.Context, id: String) = write { repository.confirmRecurringItemNow(context, id) }
     fun transfer(source: String, destination: String, amountMinor: Long, description: String, date: LocalDate = LocalDate.now()) = write { repository.transfer(source, destination, amountMinor, description, date) }
     fun addAsset(title: String, valueMinor: Long) = write { repository.addAsset(title, "OTHER", valueMinor) }
     fun updateAssetValuation(id: String, valueMinor: Long) = write { repository.updateAssetValuation(id, valueMinor) }

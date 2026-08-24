@@ -12,13 +12,16 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.assertIsDisplayed
 import android.Manifest
 import android.os.Build
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import java.util.UUID
+import kotlinx.coroutines.runBlocking
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.Description
@@ -26,11 +29,15 @@ import org.junit.runner.RunWith
 import org.junit.rules.TestRule
 import org.junit.runners.model.Statement
 import pk.vexel.financepassport.MainActivity
+import pk.vexel.financepassport.PassportApplication
 
 @RunWith(AndroidJUnit4::class)
 class RecurringDraftDeviceTest {
     @get:Rule
     val composeRule = createAndroidComposeRule<MainActivity>()
+
+    private val application: PassportApplication
+        get() = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as PassportApplication
 
     // See MoneyCaptureDeviceTest for why this is needed on API 33+ (POST_NOTIFICATIONS system
     // dialog otherwise steals focus from the Compose hierarchy right after MainActivity launches).
@@ -45,7 +52,7 @@ class RecurringDraftDeviceTest {
     fun recurringDraftCreatesReminderWithoutFinancialEvent() {
         unlockIfNeeded()
         composeRule.onNodeWithText("Money", useUnmergedTree = true).performClick()
-        composeRule.onNodeWithText("Recurring drafts", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Bills & Recurring", useUnmergedTree = true).assertIsDisplayed()
         composeRule.onNodeWithTag("add-account", useUnmergedTree = true).performClick()
         composeRule.onNodeWithTag("account-name", useUnmergedTree = true).performTextInput("Recurring Test Account")
         composeRule.onNodeWithTag("account-amount", useUnmergedTree = true).performTextInput("100000")
@@ -69,7 +76,60 @@ class RecurringDraftDeviceTest {
         // MainViewModel.addRecurringItem also writes via a fire-and-forget viewModelScope.launch,
         // not awaited by the dialog's confirm button — same race as the account save above.
         scrollToAndAssertVisible(title)
-        scrollToAndAssertVisible("Next draft reminder:", substring = true)
+        scrollToAndAssertVisible("Next due:", substring = true)
+    }
+
+    @Test
+    fun markPaidRecordsEventImmediatelyAndAdvancesSchedule() = runBlocking {
+        unlockIfNeeded()
+        composeRule.onNodeWithText("Money", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("add-account", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("account-name", useUnmergedTree = true).performTextInput("Mark Paid Account")
+        composeRule.onNodeWithTag("account-amount", useUnmergedTree = true).performTextInput("100000")
+        composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
+        scrollToAndAssertVisible("Mark Paid Account")
+        composeRule.onNode(hasScrollAction(), useUnmergedTree = true).performScrollToNode(hasTestTag("add-recurring"))
+        composeRule.onNodeWithTag("add-recurring", useUnmergedTree = true).performClick()
+
+        val title = "Electricity bill ${UUID.randomUUID().toString().take(8)}"
+        composeRule.onNodeWithTag("recurring-title", useUnmergedTree = true).performTextInput(title)
+        composeRule.onNodeWithTag("recurring-amount", useUnmergedTree = true).performTextInput("2500")
+        composeRule.onNodeWithText("Expense", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("bill-category-Electricity", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("recurring-delay", useUnmergedTree = true).performTextInput("1")
+        composeRule.onNodeWithText("Save draft", useUnmergedTree = true).performClick()
+        scrollToAndAssertVisible(title)
+
+        // Fire-and-forget write race (same class as every other MainViewModel write in this repo):
+        // poll the DAO directly rather than assuming the insert has landed the instant Save returns.
+        val recurringItem = waitForRecurringItemByTitle(title)
+        val eventCountBefore = application.repository.database.financialEventDao().getAll().size
+        val originalDueDate = recurringItem.nextDueDateEpochDay
+
+        composeRule.onNodeWithTag("mark-paid-${recurringItem.id}", useUnmergedTree = true).performScrollTo().performClick()
+
+        scrollToAndAssertVisible(title) // list re-renders after the write; item must still be present
+        val deadline = System.currentTimeMillis() + 5_000
+        var confirmed: pk.vexel.financepassport.core.database.RecurringItemEntity? = null
+        while (System.currentTimeMillis() < deadline) {
+            val current = application.repository.database.recurringItemDao().getById(recurringItem.id)
+            if (current != null && current.nextDueDateEpochDay != originalDueDate) { confirmed = current; break }
+            Thread.sleep(200)
+        }
+        checkNotNull(confirmed) { "Mark paid did not advance the recurring item's schedule within 5s" }
+        val eventCountAfter = application.repository.database.financialEventDao().getAll().size
+        check(eventCountAfter == eventCountBefore + 1) {
+            "Mark paid must record exactly one new financial event (before=$eventCountBefore, after=$eventCountAfter)"
+        }
+    }
+
+    private suspend fun waitForRecurringItemByTitle(title: String): pk.vexel.financepassport.core.database.RecurringItemEntity {
+        val deadline = System.currentTimeMillis() + 5_000
+        while (System.currentTimeMillis() < deadline) {
+            application.repository.database.recurringItemDao().getAll().firstOrNull { it.title == title }?.let { return it }
+            Thread.sleep(200)
+        }
+        error("Recurring item titled '$title' was not persisted within 5s")
     }
 
     private fun scrollToAndAssertVisible(text: String, timeoutMillis: Long = 5_000, substring: Boolean = false) {

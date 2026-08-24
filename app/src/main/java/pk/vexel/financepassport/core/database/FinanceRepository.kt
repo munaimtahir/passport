@@ -342,6 +342,24 @@ class FinanceRepository(private val db: AppDatabase) {
     }
 
     /**
+     * The explicit user action ("mark this cycle paid") that [processDueRecurringItems] deliberately
+     * never performs on its own: records a real financial event from the recurring item's stored
+     * fields right now, then advances the schedule exactly like a normal due-date rollover would.
+     * Works regardless of whether the item is actually due yet — the user may confirm early.
+     */
+    suspend fun confirmRecurringItemNow(context: Context, id: String) {
+        val item = db.recurringItemDao().getById(id) ?: error("Recurring item not found")
+        val type = runCatching { FinancialEventType.valueOf(item.eventType) }.getOrNull() ?: error("Unknown recurring event type")
+        addEvent(type, item.amountMinor, item.accountId, item.title, item.category)
+        val frequency = runCatching { RecurringFrequency.valueOf(item.frequency) }.getOrNull() ?: return
+        val nextDueDate = advanceRecurringDueDate(LocalDate.ofEpochDay(item.nextDueDateEpochDay), frequency, item.anchorDayOfMonth)
+        db.recurringItemDao().advanceDueDate(item.id, nextDueDate.toEpochDay(), Instant.now().toEpochMilli())
+        val dueAt = nextDueDate.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        db.calendarDao().upsert(CalendarItemEntity("recurring-${item.id}", "Recurring draft: ${item.title}", "RECURRING_DRAFT", dueAt, item.id, "OPEN", 0))
+        ReminderScheduler(context).schedule("recurring-${item.id}", dueAt, 0, "Recurring draft: ${item.title}", "Review and confirm this recurring ${item.eventType.lowercase()}.")
+    }
+
+    /**
      * Fires every ACTIVE recurring item whose next due date has arrived: optionally records the
      * draft financial event, then advances the schedule to its next occurrence and reschedules
      * the reminder. Safe to call repeatedly (e.g. from a periodic worker) — items not yet due are untouched.

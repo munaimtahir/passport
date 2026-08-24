@@ -463,4 +463,27 @@ class AppDatabaseTest {
         assertEquals(100_000L, stored.inflowsMinor)
         assertEquals(40_000L, stored.expenditureMinor)
     }
+
+    @Test
+    fun confirmRecurringItemNowIsNotDoubleProcessedBySameDayWorkerRun() = runBlocking {
+        val repository = FinanceRepository(database)
+        repository.addAccount("Main", "SAVINGS", 100_000)
+        val account = database.accountDao().getAll().single()
+        repository.addRecurringItem(context, "Electricity", pk.vexel.financepassport.core.model.FinancialEventType.EXPENSE, 2_500, account.id, "Electricity", "MONTHLY", 1)
+        val recurring = database.recurringItemDao().getAll().single()
+        val originalDueDate = recurring.nextDueDateEpochDay
+
+        // Simulate the user tapping "Mark paid" today...
+        repository.confirmRecurringItemNow(context, recurring.id)
+        val afterConfirm = database.recurringItemDao().getById(recurring.id)!!
+        assertTrue("confirmRecurringItemNow must advance the schedule past today", afterConfirm.nextDueDateEpochDay > originalDueDate)
+        assertEquals(1, database.financialEventDao().getAll().size)
+
+        // ...and the periodic worker also happening to run the same day. It must not re-fire for
+        // an item whose due date has already been pushed into the future by the manual confirm.
+        repository.processDueRecurringItems(context)
+        val afterWorker = database.recurringItemDao().getById(recurring.id)!!
+        assertEquals("Same-day worker run must not advance an already-confirmed item again", afterConfirm.nextDueDateEpochDay, afterWorker.nextDueDateEpochDay)
+        assertEquals("Same-day worker run must not record a second financial event", 1, database.financialEventDao().getAll().size)
+    }
 }
