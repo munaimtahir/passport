@@ -17,7 +17,9 @@ import pk.vexel.financepassport.core.calendar.NotificationHelper
 class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        if (!BuildConfig.DEBUG) {
+            window.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        }
         val preferences = (application as PassportApplication).preferences
         setContent {
             PassportTheme {
