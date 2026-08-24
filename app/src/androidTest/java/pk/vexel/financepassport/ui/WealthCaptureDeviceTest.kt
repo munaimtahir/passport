@@ -48,21 +48,22 @@ class WealthCaptureDeviceTest {
         val assetName = "Device Asset ${UUID.randomUUID().toString().take(8)}"
         composeRule.onAllNodesWithText("Add", useUnmergedTree = true).fetchSemanticsNodes().first()
         composeRule.onAllNodesWithText("Add", useUnmergedTree = true)[0].performClick()
-        val assetFields = composeRule.onAllNodes(hasSetTextAction())
-        assetFields[0].performTextInput(assetName)
-        assetFields[1].performTextInput("50000")
+        composeRule.onNodeWithTag("wealth-name", useUnmergedTree = true).performTextInput(assetName)
+        composeRule.onNodeWithTag("wealth-amount", useUnmergedTree = true).performTextInput("50000")
         composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
         scrollToAndAssertVisible(assetName)
 
         val liabilityName = "Device Liability ${UUID.randomUUID().toString().take(8)}"
         composeRule.onAllNodesWithText("Add", useUnmergedTree = true)[0].performClick()
         composeRule.onNodeWithTag("wealth-mode-LIABILITY", useUnmergedTree = true).performClick()
-        val liabilityFields = composeRule.onAllNodes(hasSetTextAction())
-        liabilityFields[0].performTextInput(liabilityName)
-        liabilityFields[1].performTextInput("10000")
+        composeRule.onNodeWithTag("wealth-name", useUnmergedTree = true).performTextInput(liabilityName)
+        composeRule.onNodeWithTag("liability-type-PERSONAL_LOAN", useUnmergedTree = true).performScrollTo().performClick()
+        composeRule.onNodeWithTag("liability-lender", useUnmergedTree = true).performTextInput("Device Bank")
+        composeRule.onNodeWithTag("wealth-amount", useUnmergedTree = true).performTextInput("10000")
         composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
         scrollToAndAssertVisible(liabilityName)
         composeRule.onNodeWithText("Recorded net wealth").assertIsDisplayed()
+        scrollToAndAssertVisible("Lender: Device Bank")
     }
 
     @Test
@@ -74,9 +75,8 @@ class WealthCaptureDeviceTest {
         composeRule.onAllNodesWithText("Add", useUnmergedTree = true)[0].performClick()
         composeRule.onNodeWithTag("wealth-mode-GOAL", useUnmergedTree = true).performScrollTo().performClick()
         composeRule.onNodeWithTag("goal-type-PURCHASE", useUnmergedTree = true).performScrollTo().performClick()
-        val goalFields = composeRule.onAllNodes(hasSetTextAction())
-        goalFields[0].performTextInput(goalName)
-        goalFields[1].performTextInput("1000")
+        composeRule.onNodeWithTag("wealth-name", useUnmergedTree = true).performTextInput(goalName)
+        composeRule.onNodeWithTag("wealth-amount", useUnmergedTree = true).performTextInput("1000")
         composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
         scrollToAndAssertVisible(goalName)
 

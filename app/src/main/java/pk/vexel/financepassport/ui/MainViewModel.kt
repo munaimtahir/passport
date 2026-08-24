@@ -68,7 +68,16 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     fun addAsset(title: String, valueMinor: Long) = write { repository.addAsset(title, "OTHER", valueMinor) }
     fun updateAssetValuation(id: String, valueMinor: Long) = write { repository.updateAssetValuation(id, valueMinor) }
     fun disposeAsset(id: String, valueMinor: Long) = write { repository.disposeAsset(id, valueMinor) }
-    fun addLiability(title: String, valueMinor: Long) = write { repository.addLiability(title, "OTHER", valueMinor) }
+    fun addLiability(
+        context: android.content.Context,
+        title: String,
+        type: String,
+        valueMinor: Long,
+        lender: String? = null,
+        dueDate: LocalDate? = null,
+        interestRateBps: Int? = null,
+        installmentAmountMinor: Long? = null,
+    ) = write { repository.addLiability(context, title, type, valueMinor, lender, dueDate, interestRateBps, installmentAmountMinor) }
     fun recordLiabilityPayment(id: String, amountMinor: Long) = write { repository.recordLiabilityPayment(id, amountMinor) }
     fun addInvestmentEvent(security: String, type: String, amountMinor: Long, quantityMinor: Long = 0, accountLabel: String = "Manual") = write { repository.addInvestmentEvent(security, type, amountMinor, quantityMinor, accountLabel = accountLabel) }
     fun addReceivable(context: android.content.Context, title: String, counterparty: String, amountMinor: Long, dueDate: LocalDate? = null) = write { repository.addReceivable(context, title, counterparty, amountMinor, dueDate) }

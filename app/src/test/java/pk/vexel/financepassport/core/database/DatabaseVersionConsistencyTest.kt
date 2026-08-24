@@ -39,9 +39,4 @@ class DatabaseVersionConsistencyTest {
             )
         }
     }
-
-    @Test
-    fun databaseVersionConstantIsWhatWasClaimedForIncomeSources() {
-        assertEquals(11, DATABASE_VERSION)
-    }
 }

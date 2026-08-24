@@ -55,7 +55,7 @@ class AppDatabaseTest {
         repository.disposeAsset(asset.id, 2_100_000)
         assertEquals("ARCHIVED", database.wealthDao().getAssetById(asset.id)?.status)
 
-        repository.addLiability("Loan", "PERSONAL", 1_000_000)
+        repository.addLiability(context, "Loan", "PERSONAL", 1_000_000)
         val liability = database.wealthDao().getAllLiabilities().single()
         repository.recordLiabilityPayment(liability.id, 250_000)
         assertEquals(750_000L, database.wealthDao().getLiabilityById(liability.id)?.outstandingAmountMinor)
@@ -241,7 +241,7 @@ class AppDatabaseTest {
             FinancialEventEntity("groceries", "EXPENSE", today, 5_000, "PKR", account.id, null, "Groceries", null, "UNKNOWN", null, 1, 1),
         ))
         repository.addAsset("Car", "VEHICLE", 800_000)
-        repository.addLiability("Loan", "PERSONAL", 200_000)
+        repository.addLiability(context, "Loan", "PERSONAL", 200_000)
         repository.addReceivable(context, "Advance", "Friend", 50_000)
 
         val position = repository.financialPosition.first()

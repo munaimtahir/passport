@@ -12,6 +12,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.assertIsDisplayed
@@ -77,9 +78,8 @@ class ManualE2EWalkthroughDeviceTest {
         val liabilityName = "E2E Liability ${UUID.randomUUID().toString().take(8)}"
         composeRule.onAllNodesWithText("Add", useUnmergedTree = true)[0].performClick()
         composeRule.onNodeWithTag("wealth-mode-LIABILITY", useUnmergedTree = true).performClick()
-        val liabilityFields = composeRule.onAllNodes(hasSetTextAction())
-        liabilityFields[0].performTextInput(liabilityName)
-        liabilityFields[1].performTextInput("5000")
+        composeRule.onNodeWithTag("wealth-name", useUnmergedTree = true).performTextInput(liabilityName)
+        composeRule.onNodeWithTag("wealth-amount", useUnmergedTree = true).performTextInput("5000")
         composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
         assertVisible(liabilityName)
 

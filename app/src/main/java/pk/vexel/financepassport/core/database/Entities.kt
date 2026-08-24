@@ -87,6 +87,8 @@ data class LiabilityEntity(
     val startDateEpochDay: Long,
     val dueDateEpochDay: Long?,
     val status: String,
+    val interestRateBps: Int? = null,
+    val installmentAmountMinor: Long? = null,
 )
 
 @Entity(tableName = "investment_events", indices = [Index("dateEpochDay"), Index("investmentAccountId")])

@@ -145,4 +145,24 @@ class DatabaseMigrationTest {
             }
         }
     }
+
+    @Test
+    fun migrateV11ToV12AddsLiabilityStructuralFields() {
+        helper.createDatabase("migration-v11", 11).apply {
+            execSQL("INSERT INTO liabilities (id, type, title, lender, originalAmountMinor, outstandingAmountMinor, currency, startDateEpochDay, dueDateEpochDay, status) VALUES ('liab-1', 'OTHER', 'Pre-existing loan', NULL, 100000, 100000, 'PKR', 0, NULL, 'ACTIVE')")
+            close()
+        }
+
+        helper.runMigrationsAndValidate("migration-v11", 12, true, DatabaseProvider.MIGRATION_11_12).use { database ->
+            database.query("SELECT interestRateBps, installmentAmountMinor FROM liabilities WHERE id = 'liab-1'").use { cursor ->
+                cursor.moveToFirst()
+                check(cursor.isNull(0) && cursor.isNull(1)) { "Pre-existing liabilities must default the new columns to NULL, not lose the row" }
+            }
+            database.execSQL("UPDATE liabilities SET interestRateBps = 1250, installmentAmountMinor = 25000 WHERE id = 'liab-1'")
+            database.query("SELECT interestRateBps, installmentAmountMinor FROM liabilities WHERE id = 'liab-1'").use { cursor ->
+                cursor.moveToFirst()
+                check(cursor.getInt(0) == 1250 && cursor.getLong(1) == 25000L) { "New columns must be settable against a real pre-existing row" }
+            }
+        }
+    }
 }

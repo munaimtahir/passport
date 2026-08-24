@@ -170,8 +170,30 @@ class FinanceRepository(private val db: AppDatabase) {
         db.wealthDao().archiveAsset(id, LocalDate.now().toEpochDay(), valueMinor)
     }
 
-    suspend fun addLiability(title: String, type: String, outstandingMinor: Long) {
-        db.wealthDao().upsertLiability(LiabilityEntity(UUID.randomUUID().toString(), type, title.trim(), null, outstandingMinor, outstandingMinor, "PKR", LocalDate.now().toEpochDay(), null, "ACTIVE"))
+    suspend fun addLiability(
+        context: Context,
+        title: String,
+        type: String,
+        outstandingMinor: Long,
+        lender: String? = null,
+        dueDate: LocalDate? = null,
+        interestRateBps: Int? = null,
+        installmentAmountMinor: Long? = null,
+    ) {
+        val id = UUID.randomUUID().toString()
+        val trimmedTitle = title.trim()
+        db.wealthDao().upsertLiability(
+            LiabilityEntity(
+                id, type, trimmedTitle, lender?.trim()?.takeIf { it.isNotBlank() }, outstandingMinor, outstandingMinor,
+                "PKR", LocalDate.now().toEpochDay(), dueDate?.toEpochDay(), "ACTIVE", interestRateBps, installmentAmountMinor,
+            ),
+        )
+        if (dueDate != null) {
+            scheduleOrCancelExpiryReminder(
+                context, "liability-due-$id", "LIABILITY_DUE", trimmedTitle, id, dueDate.toEpochDay(),
+                headline = "$trimmedTitle installment is due", body = "Review the next installment for this loan/liability.",
+            )
+        }
     }
 
     suspend fun recordLiabilityPayment(id: String, amountMinor: Long) {
