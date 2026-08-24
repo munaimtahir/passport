@@ -27,4 +27,29 @@ class TaxEngineTest {
         assertEquals(Money.pkr(1200), result.expectedClosing)
         assertEquals(Money(Money.pkr(0).minorUnits), result.unexplainedDifference)
     }
+
+    @Test fun duplicateCandidateFlagsSameAmountWithinWindow() {
+        val items = listOf(
+            DuplicateCandidateInput("a", 10, 50000, "PKR", "Grocery run"),
+            DuplicateCandidateInput("b", 11, 50000, "PKR", "Grocery run again"),
+        )
+        val issues = detectDuplicateCandidates(items, windowDays = 1)
+        assertEquals(1, issues.size)
+        assertEquals("DUPLICATE_CANDIDATE", issues.single().code)
+        assertEquals("b", issues.single().sourceId)
+    }
+
+    @Test fun duplicateCandidateIgnoresDifferentAmountsAndOutsideWindow() {
+        val differentAmount = listOf(
+            DuplicateCandidateInput("a", 10, 50000, "PKR", "Grocery"),
+            DuplicateCandidateInput("b", 10, 60000, "PKR", "Utility"),
+        )
+        assertTrue(detectDuplicateCandidates(differentAmount, windowDays = 1).isEmpty())
+
+        val outsideWindow = listOf(
+            DuplicateCandidateInput("a", 1, 50000, "PKR", "Grocery"),
+            DuplicateCandidateInput("b", 10, 50000, "PKR", "Grocery"),
+        )
+        assertTrue(detectDuplicateCandidates(outsideWindow, windowDays = 1).isEmpty())
+    }
 }
