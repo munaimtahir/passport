@@ -108,7 +108,10 @@ class RecurringDraftDeviceTest {
 
         composeRule.onNodeWithTag("mark-paid-${recurringItem.id}", useUnmergedTree = true).performScrollTo().performClick()
 
-        scrollToAndAssertVisible(title) // list re-renders after the write; item must still be present
+        // Not a plain scrollToAndAssertVisible(title) here: Mark paid records a new financial event
+        // whose description is the recurring item's own title, so after this click the title text
+        // legitimately appears twice on screen (the recurring-item card and the new Activity row) —
+        // asserting "exactly one" would be wrong, not flaky. The DAO checks below are the real proof.
         val deadline = System.currentTimeMillis() + 5_000
         var confirmed: pk.vexel.financepassport.core.database.RecurringItemEntity? = null
         while (System.currentTimeMillis() < deadline) {

@@ -10,12 +10,14 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.assertIsDisplayed
 import android.Manifest
 import android.os.Build
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import java.util.UUID
 import org.junit.Rule
@@ -25,11 +27,15 @@ import org.junit.runner.RunWith
 import org.junit.rules.TestRule
 import org.junit.runners.model.Statement
 import pk.vexel.financepassport.MainActivity
+import pk.vexel.financepassport.PassportApplication
 
 @RunWith(AndroidJUnit4::class)
 class MoneyCaptureDeviceTest {
     @get:Rule
     val composeRule = createAndroidComposeRule<MainActivity>()
+
+    private val application: PassportApplication
+        get() = InstrumentationRegistry.getInstrumentation().targetContext.applicationContext as PassportApplication
 
     // On API 33+, MainActivity requests POST_NOTIFICATIONS right after setContent; without
     // pre-granting it, the system permission dialog steals window focus from the just-created
@@ -79,9 +85,14 @@ class MoneyCaptureDeviceTest {
         composeRule.onNodeWithText("Income / expense", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Record income", useUnmergedTree = true).assertIsDisplayed()
         val sourceName = "Freelance ${UUID.randomUUID().toString().take(6)}"
-        composeRule.onNodeWithTag("add-new-income-source", useUnmergedTree = true).performClick()
-        composeRule.onNodeWithTag("new-income-source-name", useUnmergedTree = true).performTextInput(sourceName)
-        composeRule.onNodeWithTag("save-new-income-source", useUnmergedTree = true).performClick()
+        // AddEventDialog's content is a scrollable Column (fixed after this test found the dialog
+        // could overflow past the AlertDialog's visible height with income-source fields showing) —
+        // every element past the fold needs performScrollTo() before it reliably registers a click,
+        // same lesson as the Sprint 19 ScrollableTabRow case: a plain performClick() can silently
+        // no-op on an off-screen node here instead of throwing.
+        composeRule.onNodeWithTag("add-new-income-source", useUnmergedTree = true).performScrollTo().performClick()
+        composeRule.onNodeWithTag("new-income-source-name", useUnmergedTree = true).performScrollTo().performTextInput(sourceName)
+        composeRule.onNodeWithTag("save-new-income-source", useUnmergedTree = true).performScrollTo().performClick()
         // FinanceRepository.addIncomeSource writes via a fire-and-forget viewModelScope.launch (same
         // pattern as every other write in this repository) — the new source may not be selectable in
         // the dropdown the instant the click returns. The dropdown's own contents only compose while
@@ -93,6 +104,21 @@ class MoneyCaptureDeviceTest {
         composeRule.onNodeWithTag("money-event-description", useUnmergedTree = true).performTextInput("Freelance payout")
         composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
         assertVisible("Freelance payout")
+
+        // UI text presence alone can't distinguish "linked to the right source" from "linked to no
+        // source" (both would just show the event) — verify the actual link via the DAOs directly.
+        kotlinx.coroutines.runBlocking {
+            val deadline = System.currentTimeMillis() + 5_000
+            var event: pk.vexel.financepassport.core.database.FinancialEventEntity? = null
+            while (System.currentTimeMillis() < deadline) {
+                event = application.repository.database.financialEventDao().getAll().firstOrNull { it.description == "Freelance payout" }
+                if (event?.incomeSourceId != null) break
+                Thread.sleep(200)
+            }
+            checkNotNull(event) { "Freelance payout event was not persisted within 5s" }
+            val source = application.repository.database.incomeSourceDao().getById(event.incomeSourceId ?: "")
+            check(source?.name == sourceName) { "Event's incomeSourceId must resolve to the newly created source (expected '$sourceName', got '${source?.name}')" }
+        }
         assertVisible(sourceName)
     }
 
@@ -128,13 +154,13 @@ class MoneyCaptureDeviceTest {
         val deadline = System.currentTimeMillis() + timeoutMillis
         var lastError: Throwable? = null
         while (System.currentTimeMillis() < deadline) {
-            composeRule.onNodeWithTag(pickerTag, useUnmergedTree = true).performClick()
+            composeRule.onNodeWithTag(pickerTag, useUnmergedTree = true).performScrollTo().performClick()
             try {
                 composeRule.onNodeWithText(text, useUnmergedTree = true).assertIsDisplayed()
                 return
             } catch (error: AssertionError) {
                 lastError = error
-                composeRule.onNodeWithTag(pickerTag, useUnmergedTree = true).performClick()
+                composeRule.onNodeWithTag(pickerTag, useUnmergedTree = true).performScrollTo().performClick()
                 Thread.sleep(200)
             }
         }
