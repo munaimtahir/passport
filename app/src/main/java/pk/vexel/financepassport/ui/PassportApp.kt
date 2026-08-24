@@ -317,6 +317,8 @@ private fun TaxScreen(vm: MainViewModel, application: PassportApplication, paddi
     var showManualTaxItem by rememberSaveable { mutableStateOf(false) }
     var reviewTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.TaxItemEntity?>(null) }
     var draftLines by remember { mutableStateOf<List<pk.vexel.financepassport.core.database.TaxDraftLineEntity>?>(null) }
+    var mappingHistory by remember { mutableStateOf<List<pk.vexel.financepassport.core.database.TaxMappingEntity>?>(null) }
+    var mappingHistoryTaxItemId by remember { mutableStateOf<String?>(null) }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     val readiness = pk.vexel.financepassport.core.model.calculateTaxReadiness(items)
     val duplicateCandidates = items.groupBy { Triple(it.dateEpochDay, it.grossAmountMinor, it.currency) }.values.filter { group -> group.size > 1 }
@@ -363,7 +365,36 @@ private fun TaxScreen(vm: MainViewModel, application: PassportApplication, paddi
     if (showManualTaxItem) ManualTaxItemDialog(vm) { showManualTaxItem = false }
     reviewTarget?.let { item -> TaxReviewDialog(item, vm) { reviewTarget = null } }
     draftLines?.let { lines ->
-        AlertDialog(onDismissRequest = { draftLines = null }, title = { Text("Draft calculation lines") }, text = { LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) { if (lines.isEmpty()) item { Text("No generated lines.") }; items(lines, key = { it.id }) { line -> Column(verticalArrangement = Arrangement.spacedBy(2.dp)) { Text("${line.sectionCode} / ${line.categoryCode}", style = MaterialTheme.typography.titleSmall); Text("Amount ${formatPkr(line.amountMinor)} · sources ${line.sourceIdsJson}"); Text(line.calculation, style = MaterialTheme.typography.bodySmall) } } } }, confirmButton = { TextButton(onClick = { draftLines = null }) { Text("Close") } })
+        AlertDialog(onDismissRequest = { draftLines = null }, title = { Text("Draft calculation lines") }, text = { LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) { if (lines.isEmpty()) item { Text("No generated lines.") }; items(lines, key = { it.id }) { line ->
+            val sourceIds = Regex("\"([^\"]*)\"").findAll(line.sourceIdsJson).map { it.groupValues[1] }.toList()
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("${line.sectionCode} / ${line.categoryCode}", style = MaterialTheme.typography.titleSmall)
+                Text("Amount ${formatPkr(line.amountMinor)} · sources ${line.sourceIdsJson}")
+                Text(line.calculation, style = MaterialTheme.typography.bodySmall)
+                sourceIds.forEach { sourceId -> TextButton(onClick = { scope.launch { mappingHistoryTaxItemId = sourceId; mappingHistory = vm.getMappingHistory(sourceId) } }) { Text("View mapping history: $sourceId") } }
+            }
+        } } }, confirmButton = { TextButton(onClick = { draftLines = null }) { Text("Close") } })
+    }
+    mappingHistory?.let { history ->
+        AlertDialog(
+            onDismissRequest = { mappingHistory = null; mappingHistoryTaxItemId = null },
+            title = { Text("Mapping history") },
+            text = {
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item { Text("Source: ${mappingHistoryTaxItemId}", style = MaterialTheme.typography.labelSmall) }
+                    if (history.isEmpty()) item { Text("No mapping history recorded for this source.") }
+                    items(history, key = { it.id }) { mapping ->
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("${mapping.taxEventType} · ${mapping.sectionCode}/${mapping.categoryCode}", style = MaterialTheme.typography.titleSmall)
+                            Text("${mapping.source} · ruleset ${mapping.rulesetVersion}${if (mapping.supersededByMappingId == null) " · active" else " · superseded"}", style = MaterialTheme.typography.bodySmall)
+                            mapping.overrideReason?.let { Text("Reason: $it", style = MaterialTheme.typography.bodySmall) }
+                            Text(java.time.Instant.ofEpochMilli(mapping.createdAtEpochMillis).toString(), style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { mappingHistory = null; mappingHistoryTaxItemId = null }) { Text("Close") } },
+        )
     }
 }
 

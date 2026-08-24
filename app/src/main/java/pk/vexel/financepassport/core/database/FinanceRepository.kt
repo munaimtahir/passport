@@ -22,11 +22,14 @@ import java.time.Instant
 import java.util.UUID
 import pk.vexel.financepassport.core.export.ExportSnapshot
 import pk.vexel.financepassport.core.taxrules.AnnualDraftGenerator
+import pk.vexel.financepassport.core.taxrules.DuplicateCandidateInput
 import pk.vexel.financepassport.core.taxrules.TaxCandidate
 import pk.vexel.financepassport.core.taxrules.TaxEventType
+import pk.vexel.financepassport.core.taxrules.TaxIssue
 import pk.vexel.financepassport.core.taxrules.TaxRelevance
 import pk.vexel.financepassport.core.taxrules.TaxYear
 import pk.vexel.financepassport.core.taxrules.defaultPakistanStructuralRules
+import pk.vexel.financepassport.core.taxrules.detectDuplicateCandidates
 import pk.vexel.financepassport.core.taxrules.StructuralTaxClassifier
 import pk.vexel.financepassport.core.taxrules.WealthReconciliationInput
 import pk.vexel.financepassport.core.taxrules.WealthReconciliationResult
@@ -512,14 +515,31 @@ class FinanceRepository(private val db: AppDatabase) {
         val candidates = items.mapNotNull { item -> runCatching { TaxEventType.valueOf(item.taxEventType) }.getOrNull()?.let { type -> TaxCandidate(item.sourceType, item.sourceId, item.dateEpochDay, Money(MinorUnits(item.grossAmountMinor ?: 0), item.currency), item.description, type, TaxRelevance.RELEVANT) } }
         val generated = AnnualDraftGenerator().generate(domainYear, rules, candidates)
         val now = Instant.now().toEpochMilli(); val version = db.taxDraftDao().maxVersion(yearId) + 1; val draftId = UUID.randomUUID().toString()
-        val draft = TaxAnnualDraftEntity(draftId, yearId, version, rules.version, now, "DRAFT", generated.issues.size)
+
+        // Preflight issues beyond classifier output (Phase 4I/5C, previously undone): these are
+        // real, persisted, browsable TaxIssueEntity rows — not just a thrown reconciliation error
+        // or a display-only UI count — so a user can see them without first triggering the action
+        // that would otherwise surface them.
+        val missingOpeningSnapshotIssue = if (db.wealthSnapshotDao().get(yearId, "OPENING") == null) {
+            listOf(TaxIssue("MISSING_OPENING_SNAPSHOT", "Record an opening wealth snapshot", "Reconciliation for $year needs an opening wealth snapshot before it can run — record one from the Tax workspace.", null))
+        } else emptyList()
+        val duplicateCandidateIssues = detectDuplicateCandidates(
+            items.map { item -> DuplicateCandidateInput(item.sourceId, item.dateEpochDay, item.grossAmountMinor, item.currency, item.description) },
+        )
+        val allIssues = generated.issues + missingOpeningSnapshotIssue + duplicateCandidateIssues
+
+        val draft = TaxAnnualDraftEntity(draftId, yearId, version, rules.version, now, "DRAFT", allIssues.size)
         db.withTransaction {
             db.taxDraftDao().insertDraft(draft)
             db.taxDraftDao().insertLines(generated.lines.map { line -> TaxDraftLineEntity(UUID.randomUUID().toString(), draftId, line.sectionCode, line.categoryCode, line.amount.minorUnits.value, line.amount.currency, line.sourceIds.joinToString(prefix = "[\"", postfix = "\"]", separator = "\",\""), line.calculation) })
-            db.taxIssueDao().insertAll(generated.issues.map { issue -> TaxIssueEntity(UUID.randomUUID().toString(), draftId, issue.code, issue.title, issue.explanation, issue.sourceId, "OPEN", now) })
+            db.taxIssueDao().insertAll(allIssues.map { issue -> TaxIssueEntity(UUID.randomUUID().toString(), draftId, issue.code, issue.title, issue.explanation, issue.sourceId, "OPEN", now) })
         }
         return draft
     }
+
+    /** Chronological classification history for one tax item — system-generated vs. user-override,
+     * with the supersession chain intact (Phase 4F lineage, drill-down added in Phase 11). */
+    suspend fun getMappingHistory(taxItemId: String): List<TaxMappingEntity> = db.taxMappingDao().getForTaxItem(taxItemId)
 
     suspend fun getDraftLines(draftId: String): List<TaxDraftLineEntity> = db.taxDraftDao().getLines(draftId)
 

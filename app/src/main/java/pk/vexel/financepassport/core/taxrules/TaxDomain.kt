@@ -78,6 +78,37 @@ class AnnualDraftGenerator(private val classifier: TaxClassifier = StructuralTax
     }
 }
 
+/** Minimal, Room-independent shape so duplicate-candidate detection stays a pure, host-unit-testable function. */
+data class DuplicateCandidateInput(val id: String, val dateEpochDay: Long, val amountMinor: Long?, val currency: String, val description: String)
+
+/**
+ * Flags pairs of tax items that share amount/currency within [windowDays] of each other as
+ * possible duplicate captures of the same real-world event (mega-prompt Phase 4I, previously
+ * undone). Exact-date grouping already existed as a live UI count (`TaxReadiness`/`TaxScreen`);
+ * this widens detection to a small date window and turns it into persistable [TaxIssue] rows
+ * instead of a display-only count, without merging or deleting anything automatically.
+ */
+fun detectDuplicateCandidates(items: List<DuplicateCandidateInput>, windowDays: Long = 1): List<TaxIssue> {
+    val sorted = items.filter { it.amountMinor != null }.sortedBy { it.dateEpochDay }
+    val issues = mutableListOf<TaxIssue>()
+    for (i in sorted.indices) {
+        for (j in i + 1 until sorted.size) {
+            val a = sorted[i]
+            val b = sorted[j]
+            if (b.dateEpochDay - a.dateEpochDay > windowDays) break
+            if (a.amountMinor == b.amountMinor && a.currency == b.currency) {
+                issues += TaxIssue(
+                    "DUPLICATE_CANDIDATE",
+                    "Possible duplicate entry",
+                    "\"${a.description}\" and \"${b.description}\" share the same amount within $windowDays day(s) of each other — review whether the same event was captured twice.",
+                    b.id,
+                )
+            }
+        }
+    }
+    return issues.distinctBy { it.sourceId }
+}
+
 data class WealthReconciliationInput(val opening: Money, val inflows: Money, val expenditure: Money, val outflows: Money, val adjustments: Money, val recordedClosing: Money)
 data class WealthReconciliationResult(val expectedClosing: Money, val unexplainedDifference: Money, val calculation: String)
 
