@@ -143,6 +143,9 @@ interface TaxYearDao {
 
     @Query("SELECT * FROM tax_years ORDER BY yearLabel DESC")
     fun observeAll(): Flow<List<TaxYearEntity>>
+
+    @Query("UPDATE tax_years SET status = :status WHERE id = :id")
+    suspend fun updateStatus(id: String, status: String)
 }
 
 /** Snapshots are a user-recorded convenience, not an immutable source fact: re-recording the same

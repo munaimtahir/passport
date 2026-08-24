@@ -86,6 +86,7 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     suspend fun getDraftLines(draftId: String) = repository.getDraftLines(draftId)
     fun recordWealthSnapshot(kind: String) = viewModelScope.launch { reconciliationMessage = runCatching { repository.recordWealthSnapshot(selectedTaxYear, kind); "${kind.lowercase().replaceFirstChar { it.uppercase() }} snapshot recorded for $selectedTaxYearId" }.getOrElse { "Snapshot failed: ${it.message}" } }
     fun calculateReconciliation() = viewModelScope.launch { reconciliationMessage = runCatching { "Unexplained difference: PKR ${repository.calculateReconciliation(selectedTaxYearId).unexplainedDifference.minorUnits.value / 100}" }.getOrElse { "Reconciliation failed: ${it.message}" } }
+    fun updateTaxYearStatus(newStatus: String) = write { repository.updateTaxYearStatus(selectedTaxYearId, newStatus) }
     fun updateTaxReview(id: String, state: String, reason: String? = null) = write { repository.updateTaxReview(id, state, reason) }
     fun reviewTaxItem(id: String, taxEventType: String, state: String, reason: String?) = write { repository.reviewTaxItem(id, taxEventType, state, reason) }
     fun updateTaxEvidenceState(id: String, evidenceState: String) = write { repository.updateTaxEvidenceState(id, evidenceState) }

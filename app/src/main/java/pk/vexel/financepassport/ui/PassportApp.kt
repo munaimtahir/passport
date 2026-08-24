@@ -314,6 +314,7 @@ private fun TaxScreen(vm: MainViewModel, application: PassportApplication, paddi
     val drafts by vm.drafts.collectAsState()
     val issues by vm.taxIssues.collectAsState()
     val reconciliations by vm.reconciliations.collectAsState()
+    val taxYears by vm.taxYears.collectAsState()
     var showOfficialRecord by rememberSaveable { mutableStateOf(false) }
     var showManualTaxItem by rememberSaveable { mutableStateOf(false) }
     var reviewTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.TaxItemEntity?>(null) }
@@ -337,6 +338,20 @@ private fun TaxScreen(vm: MainViewModel, application: PassportApplication, paddi
             }
         }
         item { Text("Selecting a year works on that year's draft, snapshots and reconciliation below — it never changes past years' saved history.", style = MaterialTheme.typography.bodySmall) }
+        item {
+            val currentYearStatus = taxYears.find { it.id == vm.selectedTaxYearId }?.status ?: "OPEN"
+            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, androidx.compose.ui.Alignment.CenterVertically) {
+                Text("Status: $currentYearStatus", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("tax-year-status"))
+                when (currentYearStatus) {
+                    "OPEN" -> Button(onClick = { vm.updateTaxYearStatus("UNDER_REVIEW") }, modifier = Modifier.testTag("tax-year-start-review")) { Text("Start review") }
+                    "UNDER_REVIEW" -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { vm.updateTaxYearStatus("OPEN") }) { Text("Reopen") }
+                        Button(onClick = { vm.updateTaxYearStatus("FILED") }, modifier = Modifier.testTag("tax-year-mark-filed")) { Text("Mark filed") }
+                    }
+                    "FILED" -> OutlinedButton(onClick = { vm.updateTaxYearStatus("OPEN") }) { Text("Reopen") }
+                }
+            }
+        }
         item { Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) { Button(onClick = { showManualTaxItem = true }, modifier = Modifier.weight(1f)) { Text("Add tax item") }; Button(onClick = { vm.prepareAnnualDraft() }, modifier = Modifier.weight(1f)) { Text("Prepare draft") } } }
         if (vm.draftMessage != null) item { Text(vm.draftMessage!!, color = MaterialTheme.colorScheme.primary) }
         item { Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) { OutlinedButton(onClick = { vm.recordWealthSnapshot("OPENING") }, modifier = Modifier.weight(1f)) { Text("Record opening snapshot") }; OutlinedButton(onClick = { vm.recordWealthSnapshot("CLOSING") }, modifier = Modifier.weight(1f)) { Text("Record closing snapshot") } } }

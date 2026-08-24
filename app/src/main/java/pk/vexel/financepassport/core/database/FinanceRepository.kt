@@ -571,6 +571,28 @@ class FinanceRepository(private val db: AppDatabase) {
     }
 
     /**
+     * Tax-year annual-close lifecycle (mega-prompt 5F): `tax_years.status` previously only ever
+     * got set to "OPEN" at creation. This enforces the OPEN -> UNDER_REVIEW -> FILED progression,
+     * plus an explicit reopen step back to OPEN for correcting a year that was moved to review or
+     * filed too early — a real-world need, not a state a well-formed lifecycle should trap a user
+     * behind. Never silently no-ops on an invalid transition; callers get a clear error instead.
+     */
+    suspend fun updateTaxYearStatus(taxYearId: String, newStatus: String) {
+        val validStatuses = setOf("OPEN", "UNDER_REVIEW", "FILED")
+        require(newStatus in validStatuses) { "Unknown tax year status: $newStatus" }
+        val year = db.taxYearDao().getById(taxYearId) ?: error("Unknown tax year: $taxYearId")
+        val allowedTransitions = mapOf(
+            "OPEN" to setOf("UNDER_REVIEW"),
+            "UNDER_REVIEW" to setOf("FILED", "OPEN"),
+            "FILED" to setOf("OPEN"),
+        )
+        require(newStatus in (allowedTransitions[year.status] ?: emptySet())) {
+            "Cannot move tax year ${year.id} from ${year.status} to $newStatus"
+        }
+        db.taxYearDao().updateStatus(taxYearId, newStatus)
+    }
+
+    /**
      * Reconciles [taxYearId]'s recorded closing wealth against what an opening position plus the
      * year's recognized income/expenditure would predict (Phase 5E). Requires an opening snapshot
      * to exist for the year — reconciliation must never silently treat opening wealth as zero — and

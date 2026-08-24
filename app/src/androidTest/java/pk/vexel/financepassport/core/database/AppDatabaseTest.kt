@@ -334,6 +334,36 @@ class AppDatabaseTest {
         assertTrue(repository.getDraftLines(newDraft.id).any { it.categoryCode == "CHARITABLE_DONATION" })
     }
 
+    /**
+     * Phase 11: tax_years.status previously only ever got set to "OPEN" at creation — no code
+     * path ever moved it. Proves the real OPEN -> UNDER_REVIEW -> FILED progression, the reopen
+     * escape hatch from either later state back to OPEN, and that an invalid jump (e.g. OPEN
+     * straight to FILED) is rejected rather than silently allowed.
+     */
+    @Test
+    fun taxYearStatusFollowsTheOpenReviewFiledLifecycle() = runBlocking {
+        val repository = FinanceRepository(database)
+        repository.prepareAnnualDraft(2028) // creates the PK-2028 tax_years row, status OPEN
+        assertEquals("OPEN", database.taxYearDao().getById("PK-2028")?.status)
+
+        val invalidJump = runCatching { repository.updateTaxYearStatus("PK-2028", "FILED") }.exceptionOrNull()
+        assertTrue("OPEN -> FILED directly must be rejected", invalidJump is IllegalArgumentException)
+        assertEquals("OPEN", database.taxYearDao().getById("PK-2028")?.status)
+
+        repository.updateTaxYearStatus("PK-2028", "UNDER_REVIEW")
+        assertEquals("UNDER_REVIEW", database.taxYearDao().getById("PK-2028")?.status)
+
+        repository.updateTaxYearStatus("PK-2028", "OPEN") // reopen from review
+        assertEquals("OPEN", database.taxYearDao().getById("PK-2028")?.status)
+
+        repository.updateTaxYearStatus("PK-2028", "UNDER_REVIEW")
+        repository.updateTaxYearStatus("PK-2028", "FILED")
+        assertEquals("FILED", database.taxYearDao().getById("PK-2028")?.status)
+
+        repository.updateTaxYearStatus("PK-2028", "OPEN") // reopen from filed
+        assertEquals("OPEN", database.taxYearDao().getById("PK-2028")?.status)
+    }
+
     @Test
     fun reconciliationRequiresAnOpeningSnapshotBeforeRunning() = runBlocking {
         val repository = FinanceRepository(database)
