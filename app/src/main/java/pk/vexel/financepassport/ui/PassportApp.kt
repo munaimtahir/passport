@@ -198,7 +198,49 @@ private fun MoreDialog(vm: MainViewModel, application: PassportApplication, onDi
     val csvExporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri -> if (uri != null) scope.launch { application.contentResolver.openOutputStream(uri)?.use { it.write(pk.vexel.financepassport.core.export.DataExportService().csvEvents(application.repository.exportSnapshot()).toByteArray()) } } }
     val backupSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri -> val file = pendingBackup; if (uri != null && file != null) scope.launch { application.contentResolver.openOutputStream(uri)?.use { destination -> file.inputStream().use { it.copyTo(destination) } }; file.delete(); status = "Encrypted backup exported" }; pendingBackup = null }
     val backupPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) scope.launch { restorePayload = application.contentResolver.openInputStream(uri)?.use { it.readBytes() } } }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("More") }, text = { Column(Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()).testTag("more-dialog-scroll"), verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("Reports and local data controls"); status?.let { Text(it, color = MaterialTheme.colorScheme.primary) }; OutlinedButton(onClick = { currentYearOnly = !currentYearOnly }, modifier = Modifier.fillMaxWidth()) { Text(if (currentYearOnly) "Report range: current tax year" else "Report range: all recorded dates") }; Button(onClick = { exporter.launch("vexel-finance-passport-export.json") }, modifier = Modifier.fillMaxWidth()) { Text("Export structured JSON") }; Button(onClick = { scope.launch { previewReport = pk.vexel.financepassport.core.reports.ReportGenerator().netWorth(reportSnapshot(), java.time.Instant.now().toString()); pendingReportExport = { pdfExporter.launch("vexel-net-worth.pdf") } } }, modifier = Modifier.fillMaxWidth()) { Text("Preview net-worth report") }; Button(onClick = { scope.launch { previewReport = pk.vexel.financepassport.core.reports.ReportGenerator().annualFinancialSummary(reportSnapshot(), java.time.Instant.now().toString()); pendingReportExport = { annualPdfExporter.launch("vexel-annual-financial-summary.pdf") } } }, modifier = Modifier.fillMaxWidth()) { Text("Preview annual summary report") }; listOf("ASSETS" to "Asset statement", "LIABILITIES" to "Liability statement", "CASH_FLOW" to "Cash-flow summary", "INVESTMENTS" to "Investment summary", "RECEIVABLES" to "Receivables report", "TAX" to "Tax preparation summary", "EVIDENCE" to "Evidence checklist").forEach { (kind, label) -> Button(onClick = { requestedReport = kind; scope.launch { val snapshot = reportSnapshot(); val stamp = java.time.Instant.now().toString(); val generator = pk.vexel.financepassport.core.reports.ReportGenerator(); val report = when (kind) { "ASSETS" -> generator.assetStatement(snapshot, stamp); "LIABILITIES" -> generator.liabilityStatement(snapshot, stamp); "CASH_FLOW" -> generator.cashFlowSummary(snapshot, stamp); "INVESTMENTS" -> generator.investmentSummary(snapshot, stamp); "RECEIVABLES" -> generator.receivablesReport(snapshot, stamp); "TAX" -> generator.taxPreparationSummary(snapshot, stamp); "EVIDENCE" -> generator.evidenceChecklist(snapshot, stamp); else -> generator.netWorth(snapshot, stamp) }; previewReport = report; pendingReportExport = { requestedReport = kind; catalogPdfExporter.launch("vexel-${kind.lowercase()}-report.pdf") } } }, modifier = Modifier.fillMaxWidth()) { Text("Preview $label") } }; Button(onClick = { csvExporter.launch("vexel-financial-events.csv") }, modifier = Modifier.fillMaxWidth()) { Text("Export financial events CSV") }; Button(onClick = { backupPassword = true }, modifier = Modifier.fillMaxWidth()) { Text("Create encrypted backup") }; Button(onClick = { backupPicker.launch(arrayOf("application/octet-stream", "application/zip", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) { Text("Restore encrypted backup") }; Button(onClick = { confirmDelete = true }, modifier = Modifier.fillMaxWidth()) { Text("Delete all application data") } } }, confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } })
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Settings & Local Data") },
+        text = {
+            Column(
+                Modifier
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState())
+                    .testTag("more-dialog-scroll"),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("Offline local backup and data controls")
+                status?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
+
+                Button(
+                    onClick = { backupPassword = true },
+                    modifier = Modifier.fillMaxWidth().testTag("backup-button")
+                ) {
+                    Text("Create Encrypted Backup")
+                }
+
+                Button(
+                    onClick = { backupPicker.launch(arrayOf("application/octet-stream", "application/zip", "application/octet-stream")) },
+                    modifier = Modifier.fillMaxWidth().testTag("restore-button")
+                ) {
+                    Text("Restore Encrypted Backup")
+                }
+
+                Button(
+                    onClick = { confirmDelete = true },
+                    modifier = Modifier.fillMaxWidth().testTag("delete-all-button"),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete All Application Data")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
     if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false; deleteConfirmation = "" }, title = { Text("Delete everything?") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("This permanently removes local records, encrypted vault files, preferences, and scheduled work. It cannot be undone."); OutlinedTextField(deleteConfirmation, { deleteConfirmation = it }, label = { Text("Type DELETE to confirm") }, singleLine = true, modifier = Modifier.testTag("delete-confirmation")) } }, confirmButton = { Button(onClick = { vm.deleteAllData(application) { activity?.recreate() }; confirmDelete = false; deleteConfirmation = ""; onDismiss() }, enabled = deleteConfirmation == "DELETE") { Text("Delete all") } }, dismissButton = { TextButton(onClick = { confirmDelete = false; deleteConfirmation = "" }) { Text("Cancel") } })
     if (backupPassword) BackupPasswordDialog("Create encrypted backup", onDismiss = { backupPassword = false }) { password ->
         backupPassword = false
@@ -1411,6 +1453,7 @@ private fun AddBillDialog(
     profileToEdit: UtilityBillProfileEntity? = null,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     var name by rememberSaveable { mutableStateOf(profileToEdit?.name ?: "") }
     var category by rememberSaveable { mutableStateOf(profileToEdit?.category ?: "Electricity") }
     var customCategoryName by rememberSaveable { mutableStateOf(profileToEdit?.customCategoryName ?: "") }
@@ -1543,9 +1586,9 @@ private fun AddBillDialog(
                         updatedAtEpochMillis = now
                     )
                     if (profileToEdit != null) {
-                        vm.updateUtilityProfile(profile)
+                        vm.updateUtilityProfile(context, profile)
                     } else {
-                        vm.addUtilityProfile(profile)
+                        vm.addUtilityProfile(context, profile)
                     }
                     onDismiss()
                 },
@@ -1571,6 +1614,7 @@ private fun UtilityProfileDetailsDialog(
     application: PassportApplication,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     val occurrences by vm.monthlyOccurrences.collectAsState()
     val profileOccurrences = remember(occurrences, profile) {
         occurrences.filter { it.profileId == profile.id }
@@ -1693,7 +1737,7 @@ private fun UtilityProfileDetailsDialog(
                     }
                     if (profile.status == "ACTIVE") {
                         Button(
-                            onClick = { vm.archiveUtilityProfile(profile.id); onDismiss() },
+                            onClick = { vm.archiveUtilityProfile(context, profile.id); onDismiss() },
                             modifier = Modifier.weight(1f)
                         ) {
                             Icon(Icons.Filled.Archive, "Archive")
@@ -1755,7 +1799,7 @@ private fun UtilityProfileDetailsDialog(
             confirmButton = {
                 Button(
                     onClick = {
-                        vm.deleteUtilityProfile(profile.id)
+                        vm.deleteUtilityProfile(context, profile.id)
                         showDeleteConfirm = false
                         onDismiss()
                     },
@@ -1783,6 +1827,7 @@ private fun ReactivateProfileDialog(
     vm: MainViewModel,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     var reactivateMonth by rememberSaveable { mutableStateOf(java.time.YearMonth.now().toString()) }
     var errorMsg by remember { mutableStateOf<String?>(null) }
 
@@ -1804,7 +1849,7 @@ private fun ReactivateProfileDialog(
                     errorMsg = "Please enter month in YYYY-MM format."
                     return@Button
                 }
-                vm.reactivateUtilityProfile(profile.id, reactivateMonth)
+                vm.reactivateUtilityProfile(context, profile.id, reactivateMonth)
                 onDismiss()
             }) {
                 Text("Reactivate")
@@ -1822,6 +1867,7 @@ private fun AddHistoricalOccurrenceDialog(
     vm: MainViewModel,
     onDismiss: () -> Unit
 ) {
+    val context = LocalContext.current
     var year by rememberSaveable { mutableStateOf(java.time.LocalDate.now().year.toString()) }
     var month by rememberSaveable { mutableStateOf(java.time.LocalDate.now().monthValue.toString()) }
     var amount by rememberSaveable { mutableStateOf("") }
@@ -1868,12 +1914,12 @@ private fun AddHistoricalOccurrenceDialog(
                     actualDueDateEpochDay = null,
                     amountMinor = amtMinor,
                     status = "Pending",
-                    notes = "Manually added historical month",
+                                    notes = "Manually added historical month",
                     creationSource = "Manual",
                     createdAtEpochMillis = now,
                     updatedAtEpochMillis = now
                 )
-                vm.addMonthlyOccurrence(occ)
+                vm.addMonthlyOccurrence(context, occ)
                 onDismiss()
             }) {
                 Text("Add")
@@ -1899,6 +1945,8 @@ private fun MonthlyOccurrenceDetailsDialog(
         onDismiss()
         return
     }
+
+    val context = LocalContext.current
 
     var actualIssueDate by remember { mutableStateOf(occurrence.actualIssueDateEpochDay?.let { java.time.LocalDate.ofEpochDay(it) } ?: java.time.LocalDate.ofEpochDay(occurrence.expectedIssueDateEpochDay)) }
     var setActualIssueDate by remember { mutableStateOf(occurrence.actualIssueDateEpochDay != null) }
@@ -1979,7 +2027,6 @@ private fun MonthlyOccurrenceDetailsDialog(
                     }
 
                     if (paymentRecord != null) {
-                        val context = LocalContext.current
                         val scope = androidx.compose.runtime.rememberCoroutineScope()
                         val attachments by vm.observeAttachments(paymentRecord!!.id).collectAsState(initial = emptyList())
                         val pickerLauncher = rememberLauncherForActivityResult(
@@ -2086,9 +2133,9 @@ private fun MonthlyOccurrenceDetailsDialog(
                             createdAtEpochMillis = System.currentTimeMillis(),
                             updatedAtEpochMillis = System.currentTimeMillis()
                         )
-                        vm.addPayment(payment)
+                        vm.addPayment(context, payment)
                         val finalAmtMinor = billAmount.takeIf { it.isNotBlank() }?.let { PkrMoneyInput.toMinorUnits(it, false) } ?: amtPaidMinor
-                        vm.updateMonthlyOccurrence(occurrence.copy(
+                        vm.updateMonthlyOccurrence(context, occurrence.copy(
                             actualIssueDateEpochDay = actualIssueDate.toEpochDay().takeIf { setActualIssueDate },
                             actualDueDateEpochDay = actualDueDate.toEpochDay().takeIf { setActualDueDate },
                             amountMinor = finalAmtMinor,
@@ -2105,7 +2152,7 @@ private fun MonthlyOccurrenceDetailsDialog(
             } else if (showSkipForm) {
                 Button(
                     onClick = {
-                        vm.updateMonthlyOccurrence(occurrence.copy(
+                        vm.updateMonthlyOccurrence(context, occurrence.copy(
                             status = "Skipped",
                             notes = skipNotes.trim().takeIf { it.isNotEmpty() } ?: "Skipped",
                             updatedAtEpochMillis = System.currentTimeMillis()
@@ -2121,7 +2168,7 @@ private fun MonthlyOccurrenceDetailsDialog(
                     if (paymentRecord != null) {
                         Button(
                             onClick = {
-                                vm.deletePayment(paymentRecord!!.id, occurrence.id)
+                                vm.deletePayment(context, paymentRecord!!.id, occurrence.id)
                                 onDismiss()
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
@@ -2132,7 +2179,7 @@ private fun MonthlyOccurrenceDetailsDialog(
                     } else if (occurrence.status == "Skipped") {
                         Button(
                             onClick = {
-                                vm.updateMonthlyOccurrence(occurrence.copy(
+                                vm.updateMonthlyOccurrence(context, occurrence.copy(
                                     status = "Pending",
                                     notes = null,
                                     updatedAtEpochMillis = System.currentTimeMillis()
@@ -2153,7 +2200,7 @@ private fun MonthlyOccurrenceDetailsDialog(
                         Button(
                             onClick = {
                                 val amtMinor = billAmount.takeIf { it.isNotBlank() }?.let { PkrMoneyInput.toMinorUnits(it, false) }
-                                vm.updateMonthlyOccurrence(occurrence.copy(
+                                vm.updateMonthlyOccurrence(context, occurrence.copy(
                                     actualIssueDateEpochDay = actualIssueDate.toEpochDay().takeIf { setActualIssueDate },
                                     actualDueDateEpochDay = actualDueDate.toEpochDay().takeIf { setActualDueDate },
                                     amountMinor = amtMinor,

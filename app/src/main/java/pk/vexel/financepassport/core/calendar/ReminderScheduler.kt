@@ -33,6 +33,7 @@ class RecurringProcessingWorker(context: Context, params: WorkerParameters) : Co
     override suspend fun doWork(): Result = runCatching {
         val application = applicationContext as PassportApplication
         application.repository.processDueRecurringItems(applicationContext)
+        application.repository.reconcileAllUtilityBills(applicationContext)
     }.fold(onSuccess = { Result.success() }, onFailure = { Result.retry() })
 }
 

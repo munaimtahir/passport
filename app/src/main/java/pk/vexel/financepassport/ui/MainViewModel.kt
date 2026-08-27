@@ -32,47 +32,63 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     val utilityProfiles = repository.utilityProfiles.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val monthlyOccurrences = repository.monthlyOccurrences.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    fun addUtilityProfile(profile: UtilityBillProfileEntity) = write {
+    fun addUtilityProfile(context: android.content.Context, profile: UtilityBillProfileEntity) = write {
         repository.addUtilityProfile(profile)
         UtilityRecurrenceEngine.reconcileProfile(repository.database, profile, LocalDate.now())
+        repository.scheduleUtilityReminders(context)
     }
 
-    fun updateUtilityProfile(profile: UtilityBillProfileEntity) = write {
+    fun updateUtilityProfile(context: android.content.Context, profile: UtilityBillProfileEntity) = write {
         repository.updateUtilityProfile(profile)
         UtilityRecurrenceEngine.reconcileProfile(repository.database, profile, LocalDate.now())
+        repository.scheduleUtilityReminders(context)
     }
 
-    fun archiveUtilityProfile(id: String) = write {
+    fun archiveUtilityProfile(context: android.content.Context, id: String) = write {
         repository.archiveUtilityProfile(id, System.currentTimeMillis())
+        repository.database.monthlyBillOccurrenceDao().getByProfile(id).forEach { occ ->
+            repository.cancelUtilityReminders(context, occ.id)
+        }
     }
 
-    fun reactivateUtilityProfile(id: String, reactivateMonth: String) = write {
+    fun reactivateUtilityProfile(context: android.content.Context, id: String, reactivateMonth: String) = write {
         val now = System.currentTimeMillis()
         repository.reactivateUtilityProfile(id, reactivateMonth, now)
         repository.database.utilityBillDao().getById(id)?.let { profile ->
             UtilityRecurrenceEngine.reconcileProfile(repository.database, profile, LocalDate.now())
         }
+        repository.scheduleUtilityReminders(context)
     }
 
-    fun deleteUtilityProfile(id: String) = write {
+    fun deleteUtilityProfile(context: android.content.Context, id: String) = write {
+        repository.database.monthlyBillOccurrenceDao().getByProfile(id).forEach { occ ->
+            repository.cancelUtilityReminders(context, occ.id)
+        }
         repository.deleteUtilityProfile(id)
     }
 
-    fun addMonthlyOccurrence(occurrence: MonthlyBillOccurrenceEntity) = write {
+    fun addMonthlyOccurrence(context: android.content.Context, occurrence: MonthlyBillOccurrenceEntity) = write {
         repository.addMonthlyOccurrence(occurrence)
+        repository.scheduleUtilityReminders(context)
     }
 
-    fun updateMonthlyOccurrence(occurrence: MonthlyBillOccurrenceEntity) = write {
+    fun updateMonthlyOccurrence(context: android.content.Context, occurrence: MonthlyBillOccurrenceEntity) = write {
         repository.updateMonthlyOccurrence(occurrence)
+        if (occurrence.status == "Paid" || occurrence.status == "Skipped") {
+            repository.cancelUtilityReminders(context, occurrence.id)
+        } else {
+            repository.scheduleUtilityReminders(context)
+        }
     }
 
-    fun deleteMonthlyOccurrence(id: String) = write {
+    fun deleteMonthlyOccurrence(context: android.content.Context, id: String) = write {
+        repository.cancelUtilityReminders(context, id)
         repository.deleteMonthlyOccurrence(id)
     }
 
-    fun addPayment(payment: PaymentRecordEntity) = write {
+    fun addPayment(context: android.content.Context, payment: PaymentRecordEntity) = write {
         repository.addPayment(payment)
-        // Re-reconcile profile to update occurrence status to Paid
+        repository.cancelUtilityReminders(context, payment.occurrenceId)
         repository.database.monthlyBillOccurrenceDao().getById(payment.occurrenceId)?.let { occ ->
             repository.database.utilityBillDao().getById(occ.profileId)?.let { profile ->
                 UtilityRecurrenceEngine.reconcileProfile(repository.database, profile, LocalDate.now())
@@ -80,8 +96,9 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
         }
     }
 
-    fun updatePayment(id: String, occurrenceId: String, amountPaid: Long, paymentDate: Long, mode: String, bank: String?, reference: String?, notes: String?) = write {
+    fun updatePayment(context: android.content.Context, id: String, occurrenceId: String, amountPaid: Long, paymentDate: Long, mode: String, bank: String?, reference: String?, notes: String?) = write {
         repository.updatePayment(id, amountPaid, paymentDate, mode, bank, reference, notes, System.currentTimeMillis())
+        repository.cancelUtilityReminders(context, occurrenceId)
         repository.database.monthlyBillOccurrenceDao().getById(occurrenceId)?.let { occ ->
             repository.database.utilityBillDao().getById(occ.profileId)?.let { profile ->
                 UtilityRecurrenceEngine.reconcileProfile(repository.database, profile, LocalDate.now())
@@ -89,13 +106,14 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
         }
     }
 
-    fun deletePayment(id: String, occurrenceId: String) = write {
+    fun deletePayment(context: android.content.Context, id: String, occurrenceId: String) = write {
         repository.deletePayment(id)
         repository.database.monthlyBillOccurrenceDao().getById(occurrenceId)?.let { occ ->
             repository.database.utilityBillDao().getById(occ.profileId)?.let { profile ->
                 UtilityRecurrenceEngine.reconcileProfile(repository.database, profile, LocalDate.now())
             }
         }
+        repository.scheduleUtilityReminders(context)
     }
 
     fun addAttachment(attachment: BillAttachmentEntity) = write {

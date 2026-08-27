@@ -784,4 +784,46 @@ class FinanceRepository(private val db: AppDatabase) {
         db.reconciliationDao().insert(WealthReconciliationEntity(UUID.randomUUID().toString(), taxYearId, opening.netWealthMinor, income, expense, 0, 0, result.expectedClosing.minorUnits.value, recordedClosing, result.unexplainedDifference.minorUnits.value, result.calculation))
         return result
     }
+
+    suspend fun scheduleUtilityReminders(context: Context) {
+        val activeProfiles = db.utilityBillDao().getAll().filter { it.status == "ACTIVE" && it.reminderPreference == "ENABLED" }
+        val unpaidOccurrences = db.monthlyBillOccurrenceDao().getAll().filter { it.status == "Pending" || it.status == "Overdue" }
+        
+        for (occ in unpaidOccurrences) {
+            val profile = activeProfiles.find { it.id == occ.profileId } ?: continue
+            val dueDate = java.time.LocalDate.ofEpochDay(occ.expectedDueDateEpochDay)
+            val dueAtMillis = dueDate.atTime(9, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+            val monthLabel = java.time.YearMonth.of(occ.billingYear, occ.billingMonth).format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))
+            val amtStr = occ.amountMinor?.let { "PKR " + (it / 100) } ?: "TBD"
+
+            val idSoon = "soon-${occ.id}"
+            val delayBefore = 2 * 24 * 60L
+            ReminderScheduler(context).schedule(
+                idSoon, 
+                dueAtMillis, 
+                delayBefore, 
+                "Bill Due Soon: ${profile.name}", 
+                "Your bill for $monthLabel is due on $dueDate. Expected amount: $amtStr."
+            )
+            
+            val idDue = "due-${occ.id}"
+            ReminderScheduler(context).schedule(
+                idDue, 
+                dueAtMillis, 
+                0, 
+                "Bill Due Today: ${profile.name}", 
+                "Your bill for $monthLabel is due today! Please record payment."
+            )
+        }
+    }
+
+    fun cancelUtilityReminders(context: Context, occurrenceId: String) {
+        ReminderScheduler(context).cancel("soon-$occurrenceId")
+        ReminderScheduler(context).cancel("due-$occurrenceId")
+    }
+
+    suspend fun reconcileAllUtilityBills(context: Context) {
+        UtilityRecurrenceEngine.reconcileAll(db, java.time.LocalDate.now())
+        scheduleUtilityReminders(context)
+    }
 }
