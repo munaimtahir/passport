@@ -486,4 +486,104 @@ class AppDatabaseTest {
         assertEquals("Same-day worker run must not advance an already-confirmed item again", afterConfirm.nextDueDateEpochDay, afterWorker.nextDueDateEpochDay)
         assertEquals("Same-day worker run must not record a second financial event", 1, database.financialEventDao().getAll().size)
     }
+
+    @Test
+    fun utilityTrackerDatabaseLifecycle() = runBlocking {
+        // 1. Create a profile
+        val profile = UtilityBillProfileEntity(
+            id = "prof-1",
+            name = "Home Electricity",
+            category = "Electricity",
+            referenceNumber = "12345678",
+            issueDayAnchor = 15,
+            dueDayAnchor = 27,
+            recurrenceStartMonth = "2026-08",
+            status = "ACTIVE",
+            provider = "KE",
+            customCategoryName = null,
+            locationLabel = "Home",
+            connectionIdentifier = "9876",
+            notes = "Main connection",
+            reminderPreference = "ENABLED",
+            createdAtEpochMillis = 1000L,
+            updatedAtEpochMillis = 1000L
+        )
+        database.utilityBillDao().upsert(profile)
+        
+        val retrievedProfile = database.utilityBillDao().getById("prof-1")
+        assertEquals(profile, retrievedProfile)
+
+        // 2. Create occurrences
+        val occurrence1 = MonthlyBillOccurrenceEntity(
+            id = "occ-1",
+            profileId = "prof-1",
+            billingYear = 2026,
+            billingMonth = 8,
+            expectedIssueDateEpochDay = 20680L, // 15 Aug 2026
+            expectedDueDateEpochDay = 20692L,   // 27 Aug 2026
+            actualIssueDateEpochDay = null,
+            actualDueDateEpochDay = null,
+            amountMinor = null,
+            status = "Pending",
+            notes = null,
+            creationSource = "Automatic",
+            createdAtEpochMillis = 1000L,
+            updatedAtEpochMillis = 1000L
+        )
+        database.monthlyBillOccurrenceDao().upsert(occurrence1)
+        
+        // Test uniqueness index on (profileId, billingYear, billingMonth)
+        val duplicateOccurrence = occurrence1.copy(id = "occ-2")
+        val duplicateResult = runCatching {
+            database.monthlyBillOccurrenceDao().upsert(duplicateOccurrence)
+        }
+        assertTrue("Enforce unique profileId + year + month constraint", duplicateResult.isFailure)
+
+        // 3. Create payment
+        val payment = PaymentRecordEntity(
+            id = "pay-1",
+            occurrenceId = "occ-1",
+            amountPaidMinor = 500000L,
+            paymentDateEpochDay = 20685L, // 20 Aug 2026
+            paymentMode = "Cash",
+            bankName = null,
+            transactionReference = null,
+            notes = "Paid cash",
+            createdAtEpochMillis = 1000L,
+            updatedAtEpochMillis = 1000L
+        )
+        database.paymentRecordDao().insert(payment)
+        
+        // Test one completed payment record per monthly occurrence
+        val secondPayment = payment.copy(id = "pay-2")
+        val secondPaymentResult = runCatching {
+            database.paymentRecordDao().insert(secondPayment)
+        }
+        assertTrue("Enforce one-payment-per-occurrence constraint", secondPaymentResult.isFailure)
+
+        // 4. Create attachment
+        val attachment = BillAttachmentEntity(
+            id = "att-1",
+            linkedId = "pay-1",
+            attachmentType = "PAYMENT_PROOF",
+            storagePath = "/data/proof.enc",
+            displayName = "receipt.jpg",
+            mimeType = "image/jpeg",
+            sizeBytes = 1024L,
+            fileHash = "hash-123",
+            createdAtEpochMillis = 1000L
+        )
+        database.billAttachmentDao().insert(attachment)
+        
+        // 5. Test CASCADE delete
+        database.utilityBillDao().delete("prof-1")
+        
+        assertEquals(0, database.utilityBillDao().getAll().size)
+        assertEquals(0, database.monthlyBillOccurrenceDao().getAll().size)
+        assertEquals(0, database.paymentRecordDao().getAll().size)
+        // Attachments are manually cleaned up or kept
+        assertEquals(1, database.billAttachmentDao().getAll().size)
+        database.billAttachmentDao().delete("att-1")
+        assertEquals(0, database.billAttachmentDao().getAll().size)
+    }
 }

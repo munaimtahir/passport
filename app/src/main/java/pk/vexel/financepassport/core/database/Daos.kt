@@ -377,3 +377,102 @@ interface CalendarDao {
     @Query("SELECT * FROM calendar_items WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): CalendarItemEntity?
 }
+
+@Dao
+interface UtilityBillDao {
+    @Query("SELECT * FROM utility_bill_profiles ORDER BY name")
+    fun observeAll(): Flow<List<UtilityBillProfileEntity>>
+
+    @Query("SELECT * FROM utility_bill_profiles ORDER BY name")
+    suspend fun getAll(): List<UtilityBillProfileEntity>
+
+    @Query("SELECT * FROM utility_bill_profiles WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): UtilityBillProfileEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(profile: UtilityBillProfileEntity)
+
+    @Query("UPDATE utility_bill_profiles SET status = :status, updatedAtEpochMillis = :updatedAt WHERE id = :id")
+    suspend fun updateStatus(id: String, status: String, updatedAt: Long)
+    
+    @Query("DELETE FROM utility_bill_profiles WHERE id = :id")
+    suspend fun delete(id: String)
+}
+
+@Dao
+interface MonthlyBillOccurrenceDao {
+    @Query("SELECT * FROM monthly_bill_occurrences ORDER BY billingYear DESC, billingMonth DESC")
+    fun observeAll(): Flow<List<MonthlyBillOccurrenceEntity>>
+
+    @Query("SELECT * FROM monthly_bill_occurrences WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): MonthlyBillOccurrenceEntity?
+
+    @Query("SELECT * FROM monthly_bill_occurrences WHERE profileId = :profileId ORDER BY billingYear DESC, billingMonth DESC")
+    fun observeByProfile(profileId: String): Flow<List<MonthlyBillOccurrenceEntity>>
+
+    @Query("SELECT * FROM monthly_bill_occurrences WHERE profileId = :profileId ORDER BY billingYear DESC, billingMonth DESC")
+    suspend fun getByProfile(profileId: String): List<MonthlyBillOccurrenceEntity>
+
+    @Query("SELECT * FROM monthly_bill_occurrences WHERE profileId = :profileId AND billingYear = :year AND billingMonth = :month LIMIT 1")
+    suspend fun getForMonth(profileId: String, year: Int, month: Int): MonthlyBillOccurrenceEntity?
+
+    @Query("SELECT * FROM monthly_bill_occurrences WHERE status = :status ORDER BY expectedDueDateEpochDay ASC")
+    fun observeByStatus(status: String): Flow<List<MonthlyBillOccurrenceEntity>>
+
+    @Query("SELECT * FROM monthly_bill_occurrences WHERE status = :status ORDER BY expectedDueDateEpochDay ASC")
+    suspend fun getByStatus(status: String): List<MonthlyBillOccurrenceEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(occurrence: MonthlyBillOccurrenceEntity)
+
+    @Query("DELETE FROM monthly_bill_occurrences WHERE id = :id")
+    suspend fun delete(id: String)
+    
+    @Query("SELECT * FROM monthly_bill_occurrences ORDER BY billingYear DESC, billingMonth DESC")
+    suspend fun getAll(): List<MonthlyBillOccurrenceEntity>
+}
+
+@Dao
+interface PaymentRecordDao {
+    @Query("SELECT * FROM payment_records WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): PaymentRecordEntity?
+
+    @Query("SELECT * FROM payment_records WHERE occurrenceId = :occurrenceId LIMIT 1")
+    suspend fun getForOccurrence(occurrenceId: String): PaymentRecordEntity?
+
+    @Query("SELECT * FROM payment_records WHERE occurrenceId = :occurrenceId LIMIT 1")
+    fun observeForOccurrence(occurrenceId: String): Flow<PaymentRecordEntity?>
+
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insert(payment: PaymentRecordEntity)
+
+    @Query("UPDATE payment_records SET amountPaidMinor = :amountPaid, paymentDateEpochDay = :paymentDate, paymentMode = :mode, bankName = :bank, transactionReference = :reference, notes = :notes, updatedAtEpochMillis = :updatedAt WHERE id = :id")
+    suspend fun updateDetails(id: String, amountPaid: Long, paymentDate: Long, mode: String, bank: String?, reference: String?, notes: String?, updatedAt: Long)
+
+    @Query("DELETE FROM payment_records WHERE id = :id")
+    suspend fun delete(id: String)
+    
+    @Query("SELECT * FROM payment_records ORDER BY paymentDateEpochDay DESC")
+    suspend fun getAll(): List<PaymentRecordEntity>
+}
+
+@Dao
+interface BillAttachmentDao {
+    @Query("SELECT * FROM bill_attachments WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): BillAttachmentEntity?
+
+    @Query("SELECT * FROM bill_attachments WHERE linkedId = :linkedId")
+    suspend fun getForLinkedEntity(linkedId: String): List<BillAttachmentEntity>
+
+    @Query("SELECT * FROM bill_attachments WHERE linkedId = :linkedId")
+    fun observeForLinkedEntity(linkedId: String): Flow<List<BillAttachmentEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(attachment: BillAttachmentEntity)
+
+    @Query("DELETE FROM bill_attachments WHERE id = :id")
+    suspend fun delete(id: String)
+    
+    @Query("SELECT * FROM bill_attachments")
+    suspend fun getAll(): List<BillAttachmentEntity>
+}

@@ -361,3 +361,101 @@ data class ChangeLogEntity(
     val changedFieldsJson: String,
     val source: String,
 )
+
+@Entity(tableName = "utility_bill_profiles")
+data class UtilityBillProfileEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val category: String, // "Electricity", "Gas", "Telephone", "Other"
+    val referenceNumber: String,
+    val issueDayAnchor: Int,
+    val dueDayAnchor: Int,
+    val recurrenceStartMonth: String, // "YYYY-MM"
+    val status: String, // "ACTIVE", "ARCHIVED"
+    val provider: String?,
+    val customCategoryName: String?,
+    val locationLabel: String?,
+    val connectionIdentifier: String?,
+    val notes: String?,
+    val reminderPreference: String?,
+    val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long
+)
+
+@Entity(
+    tableName = "monthly_bill_occurrences",
+    foreignKeys = [
+        ForeignKey(
+            entity = UtilityBillProfileEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["profileId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [
+        Index("profileId"),
+        Index(value = ["profileId", "billingYear", "billingMonth"], unique = true)
+    ]
+)
+data class MonthlyBillOccurrenceEntity(
+    @PrimaryKey val id: String,
+    val profileId: String,
+    val billingYear: Int,
+    val billingMonth: Int,
+    val expectedIssueDateEpochDay: Long,
+    val expectedDueDateEpochDay: Long,
+    val actualIssueDateEpochDay: Long?,
+    val actualDueDateEpochDay: Long?,
+    val amountMinor: Long?,
+    val status: String, // "Expected", "Pending", "Due soon", "Overdue", "Paid", "Skipped"
+    val notes: String?,
+    val creationSource: String, // "Automatic", "Manual"
+    val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long
+)
+
+@Entity(
+    tableName = "payment_records",
+    foreignKeys = [
+        ForeignKey(
+            entity = MonthlyBillOccurrenceEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["occurrenceId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ],
+    indices = [
+        Index(value = ["occurrenceId"], unique = true)
+    ]
+)
+data class PaymentRecordEntity(
+    @PrimaryKey val id: String,
+    val occurrenceId: String,
+    val amountPaidMinor: Long,
+    val paymentDateEpochDay: Long,
+    val paymentMode: String, // "Cash", "Online banking", "Other"
+    val bankName: String?,
+    val transactionReference: String?,
+    val notes: String?,
+    val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long
+)
+
+@Entity(
+    tableName = "bill_attachments",
+    indices = [
+        Index("linkedId")
+    ]
+)
+data class BillAttachmentEntity(
+    @PrimaryKey val id: String,
+    val linkedId: String, // Linked to profile, occurrence, or payment ID
+    val attachmentType: String, // "BILL_IMAGE", "PAYMENT_PROOF"
+    val storagePath: String,
+    val displayName: String,
+    val mimeType: String,
+    val sizeBytes: Long,
+    val fileHash: String?,
+    val createdAtEpochMillis: Long
+)
+

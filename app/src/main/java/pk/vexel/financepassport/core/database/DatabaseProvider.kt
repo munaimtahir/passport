@@ -115,10 +115,23 @@ object DatabaseProvider {
         }
     }
 
+    val MIGRATION_12_13: Migration = object : Migration(12, 13) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS `utility_bill_profiles` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `category` TEXT NOT NULL, `referenceNumber` TEXT NOT NULL, `issueDayAnchor` INTEGER NOT NULL, `dueDayAnchor` INTEGER NOT NULL, `recurrenceStartMonth` TEXT NOT NULL, `status` TEXT NOT NULL, `provider` TEXT, `customCategoryName` TEXT, `locationLabel` TEXT, `connectionIdentifier` TEXT, `notes` TEXT, `reminderPreference` TEXT, `createdAtEpochMillis` INTEGER NOT NULL, `updatedAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+            db.execSQL("CREATE TABLE IF NOT EXISTS `monthly_bill_occurrences` (`id` TEXT NOT NULL, `profileId` TEXT NOT NULL, `billingYear` INTEGER NOT NULL, `billingMonth` INTEGER NOT NULL, `expectedIssueDateEpochDay` INTEGER NOT NULL, `expectedDueDateEpochDay` INTEGER NOT NULL, `actualIssueDateEpochDay` INTEGER, `actualDueDateEpochDay` INTEGER, `amountMinor` INTEGER, `status` TEXT NOT NULL, `notes` TEXT, `creationSource` TEXT NOT NULL, `createdAtEpochMillis` INTEGER NOT NULL, `updatedAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`profileId`) REFERENCES `utility_bill_profiles`(`id`) ON DELETE CASCADE)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_monthly_bill_occurrences_profileId` ON `monthly_bill_occurrences` (`profileId`)")
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_monthly_bill_occurrences_profileId_billingYear_billingMonth` ON `monthly_bill_occurrences` (`profileId`, `billingYear`, `billingMonth`)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS `payment_records` (`id` TEXT NOT NULL, `occurrenceId` TEXT NOT NULL, `amountPaidMinor` INTEGER NOT NULL, `paymentDateEpochDay` INTEGER NOT NULL, `paymentMode` TEXT NOT NULL, `bankName` TEXT, `transactionReference` TEXT, `notes` TEXT, `createdAtEpochMillis` INTEGER NOT NULL, `updatedAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`occurrenceId`) REFERENCES `monthly_bill_occurrences`(`id`) ON DELETE CASCADE)")
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_payment_records_occurrenceId` ON `payment_records` (`occurrenceId`)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS `bill_attachments` (`id` TEXT NOT NULL, `linkedId` TEXT NOT NULL, `attachmentType` TEXT NOT NULL, `storagePath` TEXT NOT NULL, `displayName` TEXT NOT NULL, `mimeType` TEXT NOT NULL, `sizeBytes` INTEGER NOT NULL, `fileHash` TEXT, `createdAtEpochMillis` INTEGER NOT NULL, PRIMARY KEY(`id`))")
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_bill_attachments_linkedId` ON `bill_attachments` (`linkedId`)")
+        }
+    }
+
     /** The single migration registry used by production and restore validation. */
     val ALL_MIGRATIONS = arrayOf(
         MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
         MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
-        MIGRATION_10_11, MIGRATION_11_12,
+        MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
     )
 }

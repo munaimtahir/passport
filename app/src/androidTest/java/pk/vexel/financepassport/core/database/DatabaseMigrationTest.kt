@@ -165,4 +165,31 @@ class DatabaseMigrationTest {
             }
         }
     }
+
+    @Test
+    fun migrateV12ToV13AddsUtilityBillTables() {
+        helper.createDatabase("migration-v12", 12).apply {
+            execSQL("INSERT INTO user_profiles (id, displayName, baseCurrency, createdAtEpochMillis, updatedAtEpochMillis) VALUES ('user', 'Demo', 'PKR', 1, 1)")
+            close()
+        }
+
+        helper.runMigrationsAndValidate("migration-v12", 13, true, DatabaseProvider.MIGRATION_12_13).use { database ->
+            database.query("SELECT COUNT(*) FROM user_profiles").use { cursor ->
+                cursor.moveToFirst()
+                check(cursor.getInt(0) == 1) { "Pre-existing user profiles must survive migration" }
+            }
+            database.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'utility_bill_profiles'").use { cursor ->
+                check(cursor.moveToFirst()) { "utility_bill_profiles table must exist after migration" }
+            }
+            database.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'monthly_bill_occurrences'").use { cursor ->
+                check(cursor.moveToFirst()) { "monthly_bill_occurrences table must exist after migration" }
+            }
+            database.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'payment_records'").use { cursor ->
+                check(cursor.moveToFirst()) { "payment_records table must exist after migration" }
+            }
+            database.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'bill_attachments'").use { cursor ->
+                check(cursor.moveToFirst()) { "bill_attachments table must exist after migration" }
+            }
+        }
+    }
 }
