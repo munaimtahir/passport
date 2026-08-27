@@ -232,11 +232,156 @@ private fun BackupPasswordDialog(title: String, onDismiss: () -> Unit, onConfirm
 
 @Composable
 private fun HomeScreen(vm: MainViewModel, application: PassportApplication, padding: PaddingValues, onNavigate: (Int) -> Unit) {
-    Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), Arrangement.spacedBy(16.dp)) {
-        Text("Home", style = MaterialTheme.typography.headlineMedium)
-        Text("Which bills need my attention?")
-        Text("Summary: 0 Pending, 0 Due soon, 0 Overdue, 0 Paid this month")
-        Text("No profiles yet. Go to Bills to add a utility bill.", style = MaterialTheme.typography.bodyMedium)
+    val profiles by vm.utilityProfiles.collectAsState()
+    val occurrences by vm.monthlyOccurrences.collectAsState()
+    val today = remember { java.time.LocalDate.now() }
+
+    val unpaidObligations = remember(occurrences, today) {
+        occurrences.filter {
+            it.status in listOf("Pending", "Due soon", "Overdue") &&
+                    !today.isBefore(java.time.LocalDate.ofEpochDay(it.expectedIssueDateEpochDay))
+        }.sortedWith(
+            compareBy<MonthlyBillOccurrenceEntity> {
+                // Priority sorting: Overdue (0), Due soon (1), Pending (2)
+                when (it.status) {
+                    "Overdue" -> 0
+                    "Due soon" -> 1
+                    else -> 2
+                }
+            }.thenBy { it.expectedDueDateEpochDay }
+        )
+    }
+
+    val overdueBills = remember(occurrences) {
+        occurrences.filter { it.status == "Overdue" }
+    }
+
+    val paidBillsThisMonth = remember(occurrences, today) {
+        occurrences.filter {
+            it.status == "Paid" &&
+                    it.billingYear == today.year &&
+                    it.billingMonth == today.monthValue
+        }
+    }
+
+    var totalPaidThisMonth by remember { mutableStateOf(0L) }
+    LaunchedEffect(occurrences, today) {
+        var total = 0L
+        val currentMonthStartEpoch = java.time.LocalDate.of(today.year, today.monthValue, 1).toEpochDay()
+        val currentMonthEndEpoch = java.time.LocalDate.of(today.year, today.monthValue, today.lengthOfMonth()).toEpochDay()
+        for (occ in occurrences) {
+            val payment = vm.getPaymentForOccurrence(occ.id)
+            if (payment != null && payment.paymentDateEpochDay in currentMonthStartEpoch..currentMonthEndEpoch) {
+                total += payment.amountPaidMinor
+            }
+        }
+        totalPaidThisMonth = total
+    }
+
+    var selectedProfileForDetails by remember { mutableStateOf<UtilityBillProfileEntity?>(null) }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        Text("Dashboard", style = MaterialTheme.typography.headlineMedium)
+
+        if (profiles.isEmpty()) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 16.dp)
+            ) {
+                Column(Modifier.padding(24.dp), Arrangement.spacedBy(12.dp), Alignment.CenterHorizontally) {
+                    Text("Welcome to Vexel Passport!", style = MaterialTheme.typography.titleMedium)
+                    Text("Register your monthly utility bills to automatically track occurrences, outstanding payments, and due dates.", style = MaterialTheme.typography.bodyMedium)
+                    Button(onClick = { onNavigate(1) }, modifier = Modifier.testTag("add-first-bill-cta")) {
+                        Text("Add Your First Bill")
+                    }
+                }
+            }
+        } else {
+            // Metrics grid
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Card(Modifier.weight(1f)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Unpaid Bills", style = MaterialTheme.typography.labelMedium)
+                        Text("${unpaidObligations.size}", style = MaterialTheme.typography.headlineSmall)
+                    }
+                }
+                Card(Modifier.weight(1f)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Overdue", style = MaterialTheme.typography.labelMedium, color = if (overdueBills.isNotEmpty()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                        Text("${overdueBills.size}", style = MaterialTheme.typography.headlineSmall, color = if (overdueBills.isNotEmpty()) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Card(Modifier.weight(1f)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Paid This Month", style = MaterialTheme.typography.labelMedium)
+                        Text("${paidBillsThisMonth.size}", style = MaterialTheme.typography.headlineSmall)
+                    }
+                }
+                Card(Modifier.weight(1f)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Total Paid This Month", style = MaterialTheme.typography.labelMedium)
+                        Text(formatPkr(totalPaidThisMonth), style = MaterialTheme.typography.headlineSmall)
+                    }
+                }
+            }
+
+            Text("Bills Requiring Attention", style = MaterialTheme.typography.titleMedium)
+            if (unpaidObligations.isEmpty()) {
+                Card(Modifier.fillMaxWidth()) {
+                    Box(Modifier.padding(24.dp), contentAlignment = Alignment.Center) {
+                        Text("No pending obligations. All bills are up to date!", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    unpaidObligations.forEach { occ ->
+                        val profile = profiles.find { it.id == occ.profileId }
+                        if (profile != null) {
+                            val monthLabel = java.time.YearMonth.of(occ.billingYear, occ.billingMonth).format(java.time.format.DateTimeFormatter.ofPattern("MMM yyyy"))
+                            val dueDateStr = java.time.LocalDate.ofEpochDay(occ.expectedDueDateEpochDay).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))
+                            Card(
+                                onClick = { selectedProfileForDetails = profile },
+                                modifier = Modifier.fillMaxWidth().testTag("pending-card-${occ.id}")
+                            ) {
+                                Row(
+                                    Modifier.padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    CategoryIcon(profile.category, modifier = Modifier.size(32.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text("${profile.name} ($monthLabel)", style = MaterialTheme.typography.titleMedium)
+                                        Text("Due: $dueDateStr", style = MaterialTheme.typography.bodyMedium)
+                                        Text("Ref: ${maskReferenceNumber(profile.referenceNumber)}", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        StatusChip(occ.status)
+                                        Text(
+                                            if (occ.amountMinor != null) formatPkr(occ.amountMinor) else "Amount TBD",
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    selectedProfileForDetails?.let { profile ->
+        UtilityProfileDetailsDialog(profile, vm, application, onDismiss = { selectedProfileForDetails = null })
     }
 }
 
