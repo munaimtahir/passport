@@ -208,6 +208,22 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     suspend fun documentDependencyCount(documentId: String) = repository.documentDependencyCount(documentId)
     fun scheduleDocumentExpiry(context: android.content.Context, documentId: String, title: String, expiryDateEpochDay: Long) = write { repository.scheduleDocumentExpiryReminder(context, documentId, title, expiryDateEpochDay) }
     fun createBackup(context: android.content.Context, password: CharArray, onComplete: (Result<java.io.File>) -> Unit) = viewModelScope.launch { onComplete(runCatching { repository.createEncryptedBackupFile(context, password) }) }
+
+    suspend fun importAttachment(context: android.content.Context, uri: android.net.Uri, linkedId: String, type: String): BillAttachmentEntity {
+        val vault = pk.vexel.financepassport.core.files.UtilityAttachmentVault(context, repository)
+        return vault.import(uri, linkedId, type)
+    }
+
+    fun decryptAttachment(context: android.content.Context, attachment: BillAttachmentEntity): ByteArray {
+        val vault = pk.vexel.financepassport.core.files.UtilityAttachmentVault(context, repository)
+        return vault.decrypt(attachment)
+    }
+
+    fun deleteAttachmentFile(context: android.content.Context, attachment: BillAttachmentEntity) = write {
+        val vault = pk.vexel.financepassport.core.files.UtilityAttachmentVault(context, repository)
+        vault.delete(attachment)
+        repository.deleteAttachment(attachment.id)
+    }
 }
 
 class MainViewModelFactory(private val repository: FinanceRepository, private val preferences: AppPreferences) : androidx.lifecycle.ViewModelProvider.Factory {

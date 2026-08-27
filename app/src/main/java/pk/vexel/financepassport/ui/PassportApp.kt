@@ -88,6 +88,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.testTag
@@ -842,6 +843,28 @@ internal fun renderDocumentPreview(application: PassportApplication, document: p
     val bytes = DocumentVault(application, application.repository).decrypt(document)
     if (document.mimeType != "application/pdf") return BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: error("Image preview could not be decoded")
     val temporary = java.io.File.createTempFile("passport-preview-", ".pdf", application.cacheDir)
+    return try {
+        temporary.writeBytes(bytes)
+        ParcelFileDescriptor.open(temporary, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+            PdfRenderer(descriptor).use { renderer ->
+                require(renderer.pageCount > 0) { "PDF has no pages" }
+                renderer.openPage(0).use { page ->
+                    Bitmap.createBitmap(page.width * 2, page.height * 2, Bitmap.Config.ARGB_8888).also { bitmap ->
+                        bitmap.eraseColor(Color.WHITE)
+                        page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                    }
+                }
+            }
+        }
+    } finally {
+        temporary.delete()
+    }
+}
+
+internal fun renderAttachmentPreview(context: android.content.Context, vm: MainViewModel, attachment: BillAttachmentEntity): Bitmap {
+    val bytes = vm.decryptAttachment(context, attachment)
+    if (attachment.mimeType != "application/pdf") return BitmapFactory.decodeByteArray(bytes, 0, bytes.size) ?: error("Image preview could not be decoded")
+    val temporary = java.io.File.createTempFile("passport-attachment-preview-", ".pdf", context.cacheDir)
     return try {
         temporary.writeBytes(bytes)
         ParcelFileDescriptor.open(temporary, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
@@ -1696,6 +1719,10 @@ private fun MonthlyOccurrenceDetailsDialog(
         paymentRecord = vm.getPaymentForOccurrence(occurrence.id)
     }
 
+    var previewAttachmentTarget by remember { mutableStateOf<BillAttachmentEntity?>(null) }
+    var previewBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    var previewError by remember { mutableStateOf<String?>(null) }
+
     val monthLabel = remember(occurrence) {
         java.time.YearMonth.of(occurrence.billingYear, occurrence.billingMonth).format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))
     }
@@ -1744,6 +1771,21 @@ private fun MonthlyOccurrenceDetailsDialog(
                     }
 
                     if (paymentRecord != null) {
+                        val context = LocalContext.current
+                        val scope = androidx.compose.runtime.rememberCoroutineScope()
+                        val attachments by vm.observeAttachments(paymentRecord!!.id).collectAsState(initial = emptyList())
+                        val pickerLauncher = rememberLauncherForActivityResult(
+                            contract = ActivityResultContracts.GetContent()
+                        ) { uri: android.net.Uri? ->
+                            uri?.let {
+                                scope.launch {
+                                    runCatching {
+                                        vm.importAttachment(context, it, paymentRecord!!.id, "PAYMENT_PROOF")
+                                    }
+                                }
+                            }
+                        }
+
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("Payment Details", style = MaterialTheme.typography.titleMedium)
@@ -1753,6 +1795,39 @@ private fun MonthlyOccurrenceDetailsDialog(
                                 if (paymentRecord!!.bankName != null) Text("Bank: ${paymentRecord!!.bankName}")
                                 if (paymentRecord!!.transactionReference != null) Text("Reference: ${paymentRecord!!.transactionReference}")
                                 if (paymentRecord!!.notes != null) Text("Notes: ${paymentRecord!!.notes}")
+
+                                Spacer(Modifier.height(8.dp))
+                                Text("Proof of Payment (Attachments)", style = MaterialTheme.typography.titleSmall)
+                                if (attachments.isEmpty()) {
+                                    Text("No proof documents attached.", style = MaterialTheme.typography.bodySmall)
+                                } else {
+                                    attachments.forEach { att ->
+                                        Row(
+                                            Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(att.displayName, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                                            Row {
+                                                IconButton(onClick = { previewAttachmentTarget = att }) {
+                                                    Icon(Icons.Filled.Visibility, "View")
+                                                }
+                                                IconButton(onClick = { vm.deleteAttachmentFile(context, att) }) {
+                                                    Icon(Icons.Filled.Delete, "Delete")
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Button(
+                                    onClick = { pickerLauncher.launch("*/*") },
+                                    modifier = Modifier.fillMaxWidth().testTag("add-attachment-button")
+                                ) {
+                                    Icon(Icons.Default.Add, "Add Attachment")
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Add Attachment Proof")
+                                }
                             }
                         }
                     } else if (occurrence.status == "Skipped") {
@@ -1902,4 +1977,40 @@ private fun MonthlyOccurrenceDetailsDialog(
             }
         }
     )
+
+    previewAttachmentTarget?.let { att ->
+        AlertDialog(
+            onDismissRequest = { previewAttachmentTarget = null; previewBitmap = null },
+            title = { Text(att.displayName) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    previewBitmap?.let {
+                        androidx.compose.foundation.Image(
+                            it,
+                            contentDescription = "Preview of ${att.displayName}",
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    } ?: Text(previewError ?: "Decrypting preview…")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { previewAttachmentTarget = null; previewBitmap = null }) {
+                    Text("Close")
+                }
+            }
+        )
+
+        val context = LocalContext.current
+        LaunchedEffect(att) {
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    renderAttachmentPreview(context, vm, att)
+                }.asImageBitmap()
+            }.onSuccess {
+                previewBitmap = it
+            }.onFailure {
+                previewError = it.message ?: "Preview failed"
+            }
+        }
+    }
 }
