@@ -89,9 +89,9 @@ import pk.vexel.financepassport.ui.theme.PassportTheme
 
 private data class Destination(val label: String, val icon: ImageVector)
 private val destinations = listOf(
-    Destination("Home", Icons.Default.Home), Destination("Money", Icons.Default.AccountBalanceWallet),
-    Destination("Wealth", Icons.AutoMirrored.Filled.TrendingUp), Destination("Tax & Records", Icons.Default.Description),
-    Destination("Vault", Icons.Default.Folder),
+    Destination("Home", Icons.Default.Home),
+    Destination("Bills", Icons.Default.Description),
+    Destination("History", Icons.Default.Folder),
 )
 
 /** Whether monetary values should render masked; toggled from the top app bar and persisted in [pk.vexel.financepassport.core.security.AppPreferences]. */
@@ -102,36 +102,39 @@ val LocalPrivacyMode = compositionLocalOf { false }
 fun PassportApp() {
     val application = LocalContext.current.applicationContext as PassportApplication
     val vm: MainViewModel = viewModel(factory = MainViewModelFactory(application.repository, application.preferences))
-    val fabAccounts by vm.accounts.collectAsState()
     var selected by rememberSaveable { mutableIntStateOf(0) }
-    var showAdd by rememberSaveable { mutableStateOf(false) }
+    var showAddBill by rememberSaveable { mutableStateOf(false) }
     var showMore by rememberSaveable { mutableStateOf(false) }
     CompositionLocalProvider(LocalPrivacyMode provides vm.privacyModeEnabled) {
         Scaffold(
             topBar = {
-                TopAppBar(title = { Text("Vexel Finance Passport") }, actions = {
+                TopAppBar(title = { Text("Utility Bill Tracker") }, actions = {
                     IconButton(onClick = vm::togglePrivacyMode) {
                         Icon(
                             if (vm.privacyModeEnabled) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
                             contentDescription = if (vm.privacyModeEnabled) "Show amounts" else "Hide amounts",
                         )
                     }
-                    IconButton(onClick = { showMore = true }) { Icon(Icons.Default.MoreHoriz, "More") }
+                    IconButton(onClick = { showMore = true }) { Icon(Icons.Default.MoreHoriz, "Settings") }
                 })
             },
-            floatingActionButton = { if (selected == 1) FloatingActionButton(onClick = { showAdd = true }, modifier = Modifier.testTag("money-fab")) { Icon(Icons.Default.Add, "Add") } },
+            floatingActionButton = {
+                if (selected == 1) {
+                    FloatingActionButton(onClick = { showAddBill = true }, modifier = Modifier.testTag("add-bill-fab")) {
+                        Icon(Icons.Default.Add, "Add Bill")
+                    }
+                }
+            },
             bottomBar = { NavigationBar { destinations.forEachIndexed { index, destination -> NavigationBarItem(selected == index, { selected = index }, icon = { Icon(destination.icon, destination.label) }, label = { Text(destination.label) }) } } },
         ) { padding ->
             when (selected) {
                 0 -> HomeScreen(vm, application, padding) { selected = it }
-                1 -> MoneyScreen(vm, application, padding)
-                2 -> WealthScreen(vm, padding)
-                3 -> TaxScreen(vm, application, padding)
-                4 -> VaultScreen(vm, application, padding)
+                1 -> BillsScreen(vm, application, padding)
+                2 -> HistoryScreen(vm, application, padding)
                 else -> EmptyModuleScreen(destinations[selected].label, padding)
             }
         }
-        if (showAdd) AddEventDialog(vm, fabAccounts) { showAdd = false }
+        if (showAddBill) AddBillDialog(vm, application) { showAddBill = false }
         if (showMore) MoreDialog(vm, application) { showMore = false }
         vm.errorMessage?.let { message ->
             AlertDialog(onDismissRequest = vm::clearError, title = { Text("Could not save") }, text = { Text(message) }, confirmButton = { TextButton(onClick = vm::clearError) { Text("OK") } })
@@ -202,109 +205,12 @@ private fun BackupPasswordDialog(title: String, onDismiss: () -> Unit, onConfirm
 
 @Composable
 private fun HomeScreen(vm: MainViewModel, application: PassportApplication, padding: PaddingValues, onNavigate: (Int) -> Unit) {
-    val totals by vm.totals.collectAsState()
-    val accounts by vm.accounts.collectAsState()
-    val activeEventCount by vm.activeEventCount.collectAsState()
-    val recentEvents by vm.recentEvents.collectAsState()
-    val calendarItems by vm.calendarItems.collectAsState()
-    val position by vm.financialPosition.collectAsState()
-    val taxItems by vm.taxItems.collectAsState()
-    val readiness = pk.vexel.financepassport.core.model.calculateTaxReadiness(taxItems)
-    val assets by vm.assets.collectAsState()
-    val liabilities by vm.liabilities.collectAsState()
-    val investments by vm.investments.collectAsState()
-    val goalProgress by vm.goalProgress.collectAsState()
-    var showCalendarAdd by rememberSaveable { mutableStateOf(false) }
-    var rescheduleTarget by remember { mutableStateOf<pk.vexel.financepassport.core.database.CalendarItemEntity?>(null) }
-    var showQuickEvent by rememberSaveable { mutableStateOf(false) }
-    var showQuickTransfer by rememberSaveable { mutableStateOf(false) }
-    var showQuickAsset by rememberSaveable { mutableStateOf(false) }
-    LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item { Text("Your financial passport", style = MaterialTheme.typography.headlineSmall) }
-        item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp), Arrangement.spacedBy(6.dp)) {
-                    Text("Net worth", style = MaterialTheme.typography.labelLarge)
-                    Text(MaskedPkr(position?.netWorthMinor ?: 0L), style = MaterialTheme.typography.displaySmall)
-                    Text("Everything you own minus everything you owe, from your recorded accounts, assets, investments, receivables and liabilities.", style = MaterialTheme.typography.bodySmall)
-                    if (position != null) {
-                        Column(Modifier.padding(top = 8.dp), Arrangement.spacedBy(2.dp)) {
-                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Liquid funds"); Text(MaskedPkr(position!!.liquidFundsMinor)) }
-                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Investments"); Text(MaskedPkr(position!!.investmentsValueMinor)) }
-                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Assets"); Text(MaskedPkr(position!!.assetsValueMinor)) }
-                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Receivables"); Text(MaskedPkr(position!!.receivablesValueMinor)) }
-                            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Liabilities"); Text(MaskedPkr(-position!!.liabilitiesValueMinor)) }
-                        }
-                    }
-                }
-            }
-        }
-        item { Text("Quick add", style = MaterialTheme.typography.titleLarge) }
-        item {
-            Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) {
-                // Falls back to switching to Money when there's no account yet — an income/expense
-                // or transfer dialog with nothing to pick from is worse than the existing nav shortcut.
-                OutlinedButton(onClick = { if (accounts.isNotEmpty()) showQuickEvent = true else onNavigate(1) }, modifier = Modifier.weight(1f).testTag("quick-add-event")) { Text("Income / expense") }
-                OutlinedButton(onClick = { if (accounts.size >= 2) showQuickTransfer = true else onNavigate(1) }, modifier = Modifier.weight(1f).testTag("quick-add-transfer")) { Text("Transfer") }
-            }
-        }
-        item {
-            Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { showQuickAsset = true }, modifier = Modifier.weight(1f).testTag("quick-add-asset")) { Text("Asset") }
-                OutlinedButton(onClick = { onNavigate(3) }, modifier = Modifier.weight(1f)) { Text("Tax item") }
-                OutlinedButton(onClick = { onNavigate(4) }, modifier = Modifier.weight(1f)) { Text("Document") }
-            }
-        }
-        item { Text("Tax-year readiness", style = MaterialTheme.typography.titleLarge) }
-        item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp), Arrangement.spacedBy(6.dp)) {
-                    Text("${readiness.evidenceResolvedCount}/${readiness.totalItemCount} tax item(s) have evidence status resolved")
-                    Text("${readiness.unmappedCount} item(s) need classification review · ${readiness.duplicateGroupCount} duplicate candidate group(s)")
-                    Text("These are workflow-completeness signals, not a statement of tax correctness.", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-        item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Upcoming obligations", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showCalendarAdd = true }) { Text("Add") } } }
-        if (calendarItems.isEmpty()) item { Text("No reminders scheduled.") }
-        items(calendarItems.take(5), key = { it.id }) { reminder -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) { Text(reminder.title, style = MaterialTheme.typography.titleMedium); Text(reminder.kind); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = { rescheduleTarget = reminder }) { Text("Reschedule") }; TextButton(onClick = { vm.updateCalendarStatus(application, reminder.id, "COMPLETED") }) { Text("Complete") }; TextButton(onClick = { vm.updateCalendarStatus(application, reminder.id, "CANCELLED") }) { Text("Cancel") } } } } }
-        item { Text("Money summary", style = MaterialTheme.typography.titleLarge) }
-        item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp), Arrangement.spacedBy(4.dp)) {
-                    Text("Income vs. expense this period", style = MaterialTheme.typography.labelLarge)
-                    Text(MaskedPkr((totals?.first?.minorUnits?.value ?: 0L) - (totals?.second?.minorUnits?.value ?: 0L)), style = MaterialTheme.typography.titleLarge)
-                    Text("Income ${MaskedPkr(position?.monthlyIncomeMinor ?: 0L)} · Expense ${MaskedPkr(position?.monthlyExpenseMinor ?: 0L)} this month, from ${accounts.size} active account(s) and $activeEventCount recorded event(s).", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-        item { Text("Wealth summary", style = MaterialTheme.typography.titleLarge) }
-        item {
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(20.dp), Arrangement.spacedBy(4.dp)) {
-                    Text("${assets.size} asset(s) · ${liabilities.size} liability/liabilities · ${investments.groupBy { it.securityName }.size} investment holding(s)", style = MaterialTheme.typography.bodyMedium)
-                    Text("Assets ${MaskedPkr(position?.assetsValueMinor ?: 0L)} · Liabilities ${MaskedPkr(-(position?.liabilitiesValueMinor ?: 0L))}", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-        if (goalProgress.isNotEmpty()) {
-            item { Text("Goals", style = MaterialTheme.typography.titleLarge) }
-            items(goalProgress.take(2), key = { (goal, _) -> "home-goal-${goal.id}" }) { (goal, progress) ->
-                Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(6.dp)) {
-                    Text(goal.title, style = MaterialTheme.typography.titleMedium)
-                    LinearProgressIndicator(progress = { progress.progressPercent / 100f }, modifier = Modifier.fillMaxWidth())
-                    Text(if (progress.isAchieved) "Achieved" else "${progress.progressPercent}% of target", style = MaterialTheme.typography.bodySmall)
-                } }
-            }
-        }
-        item { Text("Recent activity", style = MaterialTheme.typography.titleLarge) }
-        items(recentEvents.take(5), key = { it.id }) { event -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(event.description); Text(MaskedPkr(event.amountMinor)) } }
+    Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), Arrangement.spacedBy(16.dp)) {
+        Text("Home", style = MaterialTheme.typography.headlineMedium)
+        Text("Which bills need my attention?")
+        Text("Summary: 0 Pending, 0 Due soon, 0 Overdue, 0 Paid this month")
+        Text("No profiles yet. Go to Bills to add a utility bill.", style = MaterialTheme.typography.bodyMedium)
     }
-    if (showCalendarAdd) CalendarItemDialog(vm, application) { showCalendarAdd = false }
-    rescheduleTarget?.let { reminder -> RescheduleDialog(reminder, vm, application) { rescheduleTarget = null } }
-    if (showQuickEvent) AddEventDialog(vm, accounts) { showQuickEvent = false }
-    if (showQuickTransfer) TransferDialog(vm, accounts) { showQuickTransfer = false }
-    if (showQuickAsset) AddWealthDialog(vm) { showQuickAsset = false }
 }
 
 @Composable
@@ -885,4 +791,31 @@ private fun AccountPicker(label: String, accounts: List<AccountEntity>, selected
             accounts.forEach { account -> DropdownMenuItem(text = { Text(account.name) }, onClick = { onSelected(account.id); expanded = false }) }
         }
     }
+}
+
+@Composable
+private fun BillsScreen(vm: MainViewModel, application: PassportApplication, padding: PaddingValues) {
+    Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), Arrangement.spacedBy(12.dp)) {
+        Text("Bills", style = MaterialTheme.typography.headlineMedium)
+        Text("Manage recurring utility connections.")
+    }
+}
+
+@Composable
+private fun HistoryScreen(vm: MainViewModel, application: PassportApplication, padding: PaddingValues) {
+    Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), Arrangement.spacedBy(12.dp)) {
+        Text("History", style = MaterialTheme.typography.headlineMedium)
+        Text("Search and view past bill occurrences and payment history.")
+    }
+}
+
+@Composable
+private fun AddBillDialog(vm: MainViewModel, application: PassportApplication, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Utility Bill") },
+        text = { Text("Enter utility connection details.") },
+        confirmButton = { Button(onClick = onDismiss) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }

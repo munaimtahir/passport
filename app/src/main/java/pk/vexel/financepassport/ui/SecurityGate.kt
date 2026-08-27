@@ -39,7 +39,7 @@ import androidx.activity.compose.LocalActivity
 fun SecurityGate(content: @Composable () -> Unit) {
     val context = LocalContext.current.applicationContext
     val store = remember(context) { PinStore(context) }
-    var unlocked by remember { mutableStateOf(false) }
+    var unlocked by remember { mutableStateOf(!store.hasPin()) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, unlocked) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) unlocked = false }
