@@ -55,6 +55,69 @@ data class AccountBalance(val account: AccountEntity, val balance: Money)
 
 class FinanceRepository(private val db: AppDatabase) {
     internal val database: AppDatabase get() = db
+    val utilityProfiles: Flow<List<UtilityBillProfileEntity>> = db.utilityBillDao().observeAll()
+    val monthlyOccurrences: Flow<List<MonthlyBillOccurrenceEntity>> = db.monthlyBillOccurrenceDao().observeAll()
+
+    fun observeOccurrencesByStatus(status: String): Flow<List<MonthlyBillOccurrenceEntity>> =
+        db.monthlyBillOccurrenceDao().observeByStatus(status)
+
+    suspend fun addUtilityProfile(profile: UtilityBillProfileEntity) {
+        db.utilityBillDao().upsert(profile)
+    }
+
+    suspend fun updateUtilityProfile(profile: UtilityBillProfileEntity) {
+        db.utilityBillDao().upsert(profile)
+    }
+
+    suspend fun archiveUtilityProfile(id: String, archiveDate: Long) {
+        db.utilityBillDao().updateStatus(id, "ARCHIVED", archiveDate)
+    }
+
+    suspend fun reactivateUtilityProfile(id: String, reactivateMonth: String, now: Long) {
+        db.utilityBillDao().getById(id)?.let { profile ->
+            db.utilityBillDao().upsert(profile.copy(status = "ACTIVE", recurrenceStartMonth = reactivateMonth, updatedAtEpochMillis = now))
+        }
+    }
+
+    suspend fun deleteUtilityProfile(id: String) {
+        db.utilityBillDao().delete(id)
+    }
+
+    suspend fun addMonthlyOccurrence(occurrence: MonthlyBillOccurrenceEntity) {
+        db.monthlyBillOccurrenceDao().upsert(occurrence)
+    }
+
+    suspend fun updateMonthlyOccurrence(occurrence: MonthlyBillOccurrenceEntity) {
+        db.monthlyBillOccurrenceDao().upsert(occurrence)
+    }
+
+    suspend fun deleteMonthlyOccurrence(id: String) {
+        db.monthlyBillOccurrenceDao().delete(id)
+    }
+
+    suspend fun addPayment(payment: PaymentRecordEntity) {
+        db.paymentRecordDao().insert(payment)
+    }
+
+    suspend fun updatePayment(id: String, amountPaid: Long, paymentDate: Long, mode: String, bank: String?, reference: String?, notes: String?, updatedAt: Long) {
+        db.paymentRecordDao().updateDetails(id, amountPaid, paymentDate, mode, bank, reference, notes, updatedAt)
+    }
+
+    suspend fun deletePayment(id: String) {
+        db.paymentRecordDao().delete(id)
+    }
+
+    suspend fun addAttachment(attachment: BillAttachmentEntity) {
+        db.billAttachmentDao().insert(attachment)
+    }
+
+    suspend fun deleteAttachment(id: String) {
+        db.billAttachmentDao().delete(id)
+    }
+
+    fun observeAttachments(linkedId: String): Flow<List<BillAttachmentEntity>> =
+        db.billAttachmentDao().observeForLinkedEntity(linkedId)
+
     val accounts: Flow<List<AccountEntity>> = db.accountDao().observeActive()
     val incomeSources: Flow<List<IncomeSourceEntity>> = db.incomeSourceDao().observeActive()
     val recentEvents: Flow<List<FinancialEventEntity>> = db.financialEventDao().observeRecent(200)

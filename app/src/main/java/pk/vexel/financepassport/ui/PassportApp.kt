@@ -32,10 +32,21 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Unarchive
 import androidx.compose.material.icons.automirrored.filled.TrendingUp
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -56,6 +67,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Surface
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
@@ -71,6 +84,12 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -81,11 +100,19 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import pk.vexel.financepassport.PassportApplication
 import pk.vexel.financepassport.core.database.AccountEntity
+import pk.vexel.financepassport.core.database.UtilityBillProfileEntity
+import pk.vexel.financepassport.core.database.MonthlyBillOccurrenceEntity
+import pk.vexel.financepassport.core.database.PaymentRecordEntity
+import pk.vexel.financepassport.core.database.BillAttachmentEntity
+import pk.vexel.financepassport.core.database.UtilityRecurrenceEngine
 import pk.vexel.financepassport.core.model.FinancialEventType
 import pk.vexel.financepassport.core.model.PkrMoneyInput
 import pk.vexel.financepassport.core.files.DocumentVault
 import pk.vexel.financepassport.core.security.LiveRestoreService
 import pk.vexel.financepassport.ui.theme.PassportTheme
+import java.util.UUID
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
 
 private data class Destination(val label: String, val icon: ImageVector)
 private val destinations = listOf(
@@ -793,11 +820,202 @@ private fun AccountPicker(label: String, accounts: List<AccountEntity>, selected
     }
 }
 
+private fun getProfileStatusAndDueDate(profile: UtilityBillProfileEntity, occurrences: List<MonthlyBillOccurrenceEntity>): Pair<String, String> {
+    val profileOccurrences = occurrences.filter { it.profileId == profile.id }
+    if (profileOccurrences.isEmpty()) return "No bills" to "-"
+    val today = java.time.LocalDate.now()
+    val currentMonthOcc = profileOccurrences.find { it.billingYear == today.year && it.billingMonth == today.monthValue }
+    if (currentMonthOcc != null) {
+        val dueDateStr = java.time.LocalDate.ofEpochDay(currentMonthOcc.expectedDueDateEpochDay).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))
+        return currentMonthOcc.status to dueDateStr
+    }
+    val nextOcc = profileOccurrences.sortedBy { it.expectedDueDateEpochDay }.firstOrNull { it.status != "Paid" && it.status != "Skipped" }
+        ?: profileOccurrences.maxByOrNull { it.billingYear * 12 + it.billingMonth }
+    if (nextOcc != null) {
+        val dueDateStr = java.time.LocalDate.ofEpochDay(nextOcc.expectedDueDateEpochDay).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))
+        return nextOcc.status to dueDateStr
+    }
+    return "-" to "-"
+}
+
+private fun maskReferenceNumber(ref: String): String {
+    if (ref.length <= 4) return ref
+    return "••••" + ref.takeLast(4)
+}
+
+@Composable
+private fun CategoryIcon(category: String, modifier: Modifier = Modifier) {
+    val icon = when (category) {
+        "Electricity" -> Icons.Filled.FlashOn
+        "Telephone" -> Icons.Filled.Phone
+        "Gas" -> Icons.Filled.Star
+        else -> Icons.Filled.Description
+    }
+    Icon(icon, contentDescription = category, modifier = modifier)
+}
+
+@Composable
+private fun StatusChip(status: String) {
+    val containerColor = when (status) {
+        "Overdue" -> MaterialTheme.colorScheme.errorContainer
+        "Due soon" -> MaterialTheme.colorScheme.tertiaryContainer
+        "Paid" -> MaterialTheme.colorScheme.primaryContainer
+        "Pending" -> MaterialTheme.colorScheme.secondaryContainer
+        "Expected" -> MaterialTheme.colorScheme.surfaceVariant
+        "Skipped" -> MaterialTheme.colorScheme.surfaceVariant
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
+    val contentColor = when (status) {
+        "Overdue" -> MaterialTheme.colorScheme.onErrorContainer
+        "Due soon" -> MaterialTheme.colorScheme.onTertiaryContainer
+        "Paid" -> MaterialTheme.colorScheme.onPrimaryContainer
+        "Pending" -> MaterialTheme.colorScheme.onSecondaryContainer
+        "Expected" -> MaterialTheme.colorScheme.onSurfaceVariant
+        "Skipped" -> MaterialTheme.colorScheme.onSurfaceVariant
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    Surface(
+        color = containerColor,
+        contentColor = contentColor,
+        shape = MaterialTheme.shapes.small,
+        modifier = Modifier.padding(vertical = 2.dp)
+    ) {
+        Text(
+            status,
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            style = MaterialTheme.typography.labelMedium
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BillsScreen(vm: MainViewModel, application: PassportApplication, padding: PaddingValues) {
-    Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), Arrangement.spacedBy(12.dp)) {
-        Text("Bills", style = MaterialTheme.typography.headlineMedium)
-        Text("Manage recurring utility connections.")
+    val profiles by vm.utilityProfiles.collectAsState()
+    val occurrences by vm.monthlyOccurrences.collectAsState()
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var selectedCategoryFilter by rememberSaveable { mutableStateOf("All") }
+    var selectedStatusFilter by rememberSaveable { mutableStateOf("Active") }
+    var selectedProfileForDetails by remember { mutableStateOf<UtilityBillProfileEntity?>(null) }
+    var showAddBillDialog by rememberSaveable { mutableStateOf(false) }
+
+    val filteredProfiles = remember(profiles, searchQuery, selectedCategoryFilter, selectedStatusFilter) {
+        profiles.filter { profile ->
+            val matchesSearch = profile.name.contains(searchQuery, ignoreCase = true) ||
+                    profile.referenceNumber.contains(searchQuery, ignoreCase = true) ||
+                    (profile.provider ?: "").contains(searchQuery, ignoreCase = true)
+            val matchesCategory = selectedCategoryFilter == "All" || profile.category == selectedCategoryFilter
+            val matchesStatus = when (selectedStatusFilter) {
+                "Active" -> profile.status == "ACTIVE"
+                "Archived" -> profile.status == "ARCHIVED"
+                else -> true
+            }
+            matchesSearch && matchesCategory && matchesStatus
+        }
+    }
+
+    val groupedProfiles = remember(filteredProfiles) {
+        filteredProfiles.groupBy { it.category }
+    }
+
+    Scaffold(
+        floatingActionButton = {
+            if (selectedStatusFilter == "Active") {
+                FloatingActionButton(onClick = { showAddBillDialog = true }, modifier = Modifier.testTag("add-bill-fab")) {
+                    Icon(Icons.Default.Add, "Add Bill")
+                }
+            }
+        }
+    ) { innerPadding ->
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(innerPadding)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("Utility Connections", style = MaterialTheme.typography.headlineMedium)
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                label = { Text("Search by name, provider, or reference") },
+                leadingIcon = { Icon(Icons.Default.Search, "Search") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().testTag("bills-search")
+            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("Active", "Archived", "All").forEach { statusOpt ->
+                    FilterChip(
+                        selected = selectedStatusFilter == statusOpt,
+                        onClick = { selectedStatusFilter = statusOpt },
+                        label = { Text(statusOpt) },
+                        modifier = Modifier.testTag("filter-status-$statusOpt")
+                    )
+                }
+            }
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("All", "Electricity", "Gas", "Telephone", "Other").forEach { catOpt ->
+                    FilterChip(
+                        selected = selectedCategoryFilter == catOpt,
+                        onClick = { selectedCategoryFilter = catOpt },
+                        label = { Text(catOpt) },
+                        modifier = Modifier.testTag("filter-category-$catOpt")
+                    )
+                }
+            }
+            if (filteredProfiles.isEmpty()) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("No utility bills found. Tap + to add one.", style = MaterialTheme.typography.bodyLarge)
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    contentPadding = PaddingValues(bottom = 80.dp)
+                ) {
+                    groupedProfiles.forEach { (category, categoryProfiles) ->
+                        item {
+                            Text(category, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+                        }
+                        items(categoryProfiles, key = { it.id }) { profile ->
+                            val (currentStatus, nextDueDate) = remember(profile, occurrences) {
+                                getProfileStatusAndDueDate(profile, occurrences)
+                            }
+                            Card(
+                                onClick = { selectedProfileForDetails = profile },
+                                modifier = Modifier.fillMaxWidth().testTag("profile-card-${profile.id}")
+                            ) {
+                                Row(
+                                    Modifier.padding(16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    CategoryIcon(profile.category, modifier = Modifier.size(32.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(profile.name, style = MaterialTheme.typography.titleMedium)
+                                        Text("${profile.provider ?: "Unknown"} · ${profile.locationLabel ?: "Home"}", style = MaterialTheme.typography.bodyMedium)
+                                        Text("Ref: ${maskReferenceNumber(profile.referenceNumber)}", style = MaterialTheme.typography.bodySmall)
+                                    }
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        StatusChip(currentStatus)
+                                        Text("Due: $nextDueDate", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showAddBillDialog) {
+        AddBillDialog(vm, application) { showAddBillDialog = false }
+    }
+
+    selectedProfileForDetails?.let { profile ->
+        UtilityProfileDetailsDialog(profile, vm, application, onDismiss = { selectedProfileForDetails = null })
     }
 }
 
@@ -809,13 +1027,476 @@ private fun HistoryScreen(vm: MainViewModel, application: PassportApplication, p
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AddBillDialog(vm: MainViewModel, application: PassportApplication, onDismiss: () -> Unit) {
+private fun AddBillDialog(
+    vm: MainViewModel,
+    application: PassportApplication,
+    profileToEdit: UtilityBillProfileEntity? = null,
+    onDismiss: () -> Unit
+) {
+    var name by rememberSaveable { mutableStateOf(profileToEdit?.name ?: "") }
+    var category by rememberSaveable { mutableStateOf(profileToEdit?.category ?: "Electricity") }
+    var customCategoryName by rememberSaveable { mutableStateOf(profileToEdit?.customCategoryName ?: "") }
+    var referenceNumber by rememberSaveable { mutableStateOf(profileToEdit?.referenceNumber ?: "") }
+    var provider by rememberSaveable { mutableStateOf(profileToEdit?.provider ?: "") }
+    var locationLabel by rememberSaveable { mutableStateOf(profileToEdit?.locationLabel ?: "Home") }
+    var customLocationLabel by rememberSaveable { mutableStateOf(if (profileToEdit?.locationLabel != "Home" && profileToEdit?.locationLabel != "Clinic" && profileToEdit?.locationLabel != "Office") profileToEdit?.locationLabel ?: "" else "") }
+    var connectionIdentifier by rememberSaveable { mutableStateOf(profileToEdit?.connectionIdentifier ?: "") }
+    var issueDayAnchor by rememberSaveable { mutableStateOf(profileToEdit?.issueDayAnchor?.toString() ?: "15") }
+    var dueDayAnchor by rememberSaveable { mutableStateOf(profileToEdit?.dueDayAnchor?.toString() ?: "27") }
+    var recurrenceStartMonth by rememberSaveable { mutableStateOf(profileToEdit?.recurrenceStartMonth ?: java.time.YearMonth.now().toString()) }
+    var reminderPreference by rememberSaveable { mutableStateOf(profileToEdit?.reminderPreference ?: "ENABLED") }
+    var notes by rememberSaveable { mutableStateOf(profileToEdit?.notes ?: "") }
+
+    val profiles by vm.utilityProfiles.collectAsState()
+    var duplicateWarningShown by remember { mutableStateOf(false) }
+    var forceSave by remember { mutableStateOf(false) }
+
+    val issueVal = issueDayAnchor.toIntOrNull()
+    val dueVal = dueDayAnchor.toIntOrNull()
+    val isValid = name.isNotBlank() &&
+            referenceNumber.isNotBlank() &&
+            (category != "Other" || customCategoryName.isNotBlank()) &&
+            issueVal in 1..31 &&
+            dueVal in 1..31 &&
+            runCatching { java.time.YearMonth.parse(recurrenceStartMonth) }.isSuccess
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add Utility Bill") },
-        text = { Text("Enter utility connection details.") },
-        confirmButton = { Button(onClick = onDismiss) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+        title = { Text(if (profileToEdit == null) "Add Utility Bill" else "Edit Utility Bill") },
+        text = {
+            Column(
+                Modifier
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                if (duplicateWarningShown) {
+                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Warning: Duplicate Detected", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onErrorContainer)
+                            Text("A utility bill with this category, provider, and reference number already exists. Save anyway?", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer)
+                        }
+                    }
+                }
+                Text("Bill Identity", style = MaterialTheme.typography.titleMedium)
+                OutlinedTextField(name, { name = it }, label = { Text("Bill Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("bill-name"))
+                Text("Category")
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Electricity", "Gas", "Telephone", "Other").forEach { cat ->
+                        FilterChip(
+                            selected = category == cat,
+                            onClick = { category = cat },
+                            label = { Text(cat) },
+                            modifier = Modifier.testTag("chip-category-$cat")
+                        )
+                    }
+                }
+                if (category == "Other") {
+                    OutlinedTextField(customCategoryName, { customCategoryName = it }, label = { Text("Service Name (Required)") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("custom-category"))
+                }
+                OutlinedTextField(provider, { provider = it }, label = { Text("Provider/Company") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("provider"))
+                OutlinedTextField(referenceNumber, { referenceNumber = it }, label = { Text("Reference/Consumer Number") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("reference-number"))
+                Text("Location")
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("Home", "Clinic", "Office", "Other").forEach { loc ->
+                        FilterChip(
+                            selected = locationLabel == loc,
+                            onClick = { locationLabel = loc },
+                            label = { Text(loc) },
+                            modifier = Modifier.testTag("chip-location-$loc")
+                        )
+                    }
+                }
+                if (locationLabel == "Other") {
+                    OutlinedTextField(customLocationLabel, { customLocationLabel = it }, label = { Text("Custom Location Label") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("custom-location"))
+                }
+                Text("Monthly Schedule", style = MaterialTheme.typography.titleMedium)
+                OutlinedTextField(issueDayAnchor, { issueDayAnchor = it.filter(Char::isDigit) }, label = { Text("Approx. Issue Day (1-31)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth().testTag("issue-day"))
+                OutlinedTextField(dueDayAnchor, { dueDayAnchor = it.filter(Char::isDigit) }, label = { Text("Approx. Due Day (1-31)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true, modifier = Modifier.fillMaxWidth().testTag("due-day"))
+                OutlinedTextField(recurrenceStartMonth, { recurrenceStartMonth = it }, label = { Text("Start Month (YYYY-MM)") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("start-month"))
+                Text("Reminder Preference")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf("ENABLED", "DISABLED").forEach { pref ->
+                        FilterChip(
+                            selected = reminderPreference == pref,
+                            onClick = { reminderPreference = pref },
+                            label = { Text(pref.lowercase().replaceFirstChar { it.uppercase() }) },
+                            modifier = Modifier.testTag("chip-reminder-$pref")
+                        )
+                    }
+                }
+                Text("Optional Information", style = MaterialTheme.typography.titleMedium)
+                OutlinedTextField(connectionIdentifier, { connectionIdentifier = it }, label = { Text("Connection/Identifier") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("connection-id"))
+                OutlinedTextField(notes, { notes = it }, label = { Text("Notes") }, modifier = Modifier.fillMaxWidth().testTag("notes"))
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (profileToEdit == null && !forceSave) {
+                        val isDuplicate = profiles.any {
+                            it.category.equals(category, ignoreCase = true) &&
+                                    it.referenceNumber.equals(referenceNumber, ignoreCase = true) &&
+                                    (it.provider ?: "").equals(provider, ignoreCase = true)
+                        }
+                        if (isDuplicate && !duplicateWarningShown) {
+                            duplicateWarningShown = true
+                            return@Button
+                        }
+                    }
+                    val finalLocation = if (locationLabel == "Other") customLocationLabel else locationLabel
+                    val now = System.currentTimeMillis()
+                    val profile = UtilityBillProfileEntity(
+                        id = profileToEdit?.id ?: UUID.randomUUID().toString(),
+                        name = name.trim(),
+                        category = category,
+                        referenceNumber = referenceNumber.trim(),
+                        issueDayAnchor = issueDayAnchor.toInt(),
+                        dueDayAnchor = dueDayAnchor.toInt(),
+                        recurrenceStartMonth = recurrenceStartMonth.trim(),
+                        status = profileToEdit?.status ?: "ACTIVE",
+                        provider = provider.trim().takeIf { it.isNotEmpty() },
+                        customCategoryName = customCategoryName.trim().takeIf { category == "Other" },
+                        locationLabel = finalLocation.trim().takeIf { it.isNotEmpty() },
+                        connectionIdentifier = connectionIdentifier.trim().takeIf { it.isNotEmpty() },
+                        notes = notes.trim().takeIf { it.isNotEmpty() },
+                        reminderPreference = reminderPreference,
+                        createdAtEpochMillis = profileToEdit?.createdAtEpochMillis ?: now,
+                        updatedAtEpochMillis = now
+                    )
+                    if (profileToEdit != null) {
+                        vm.updateUtilityProfile(profile)
+                    } else {
+                        vm.addUtilityProfile(profile)
+                    }
+                    onDismiss()
+                },
+                enabled = isValid,
+                modifier = Modifier.testTag("save-bill-button")
+            ) {
+                Text(if (duplicateWarningShown) "Save Anyway" else "Save")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun UtilityProfileDetailsDialog(
+    profile: UtilityBillProfileEntity,
+    vm: MainViewModel,
+    application: PassportApplication,
+    onDismiss: () -> Unit
+) {
+    val occurrences by vm.monthlyOccurrences.collectAsState()
+    val profileOccurrences = remember(occurrences, profile) {
+        occurrences.filter { it.profileId == profile.id }
+            .sortedWith(compareByDescending<MonthlyBillOccurrenceEntity> { it.billingYear }.thenByDescending { it.billingMonth })
+    }
+
+    val totalOccurrences = profileOccurrences.size
+    val paidCount = profileOccurrences.count { it.status == "Paid" }
+    val pendingCount = profileOccurrences.count { it.status == "Pending" }
+    val overdueCount = profileOccurrences.count { it.status == "Overdue" }
+
+    var totalPaidAmount by remember { mutableStateOf(0L) }
+    var latestPaymentDateStr by remember { mutableStateOf("-") }
+
+    LaunchedEffect(profileOccurrences) {
+        var total = 0L
+        var latestDate = 0L
+        for (occ in profileOccurrences) {
+            val payment = vm.getPaymentForOccurrence(occ.id)
+            if (payment != null) {
+                total += payment.amountPaidMinor
+                if (payment.paymentDateEpochDay > latestDate) {
+                    latestDate = payment.paymentDateEpochDay
+                }
+            }
+        }
+        totalPaidAmount = total
+        latestPaymentDateStr = if (latestDate > 0) {
+            java.time.LocalDate.ofEpochDay(latestDate).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))
+        } else "-"
+    }
+
+    var showEditProfile by remember { mutableStateOf(false) }
+    var showAddHistorical by remember { mutableStateOf(false) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CategoryIcon(profile.category, modifier = Modifier.size(28.dp))
+                Text(profile.name)
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("Reference: ${profile.referenceNumber}", style = MaterialTheme.typography.bodyMedium)
+                    if (profile.provider != null) Text("Provider: ${profile.provider}", style = MaterialTheme.typography.bodyMedium)
+                    if (profile.locationLabel != null) Text("Location: ${profile.locationLabel}", style = MaterialTheme.typography.bodyMedium)
+                    Text("Schedule: Issue approx. ${profile.issueDayAnchor}th · Due approx. ${profile.dueDayAnchor}th", style = MaterialTheme.typography.bodySmall)
+                    Text("Status: ${profile.status}", style = MaterialTheme.typography.bodySmall)
+                    if (profile.notes != null) Text("Notes: ${profile.notes}", style = MaterialTheme.typography.bodySmall)
+                }
+
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Connection Statistics", style = MaterialTheme.typography.titleMedium)
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Total Bills: $totalOccurrences")
+                            Text("Paid: $paidCount")
+                        }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Pending: $pendingCount")
+                            Text("Overdue: $overdueCount")
+                        }
+                        Text("Total Paid: ${formatPkr(totalPaidAmount)}", style = MaterialTheme.typography.titleSmall)
+                        Text("Latest Payment: $latestPaymentDateStr", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+
+                Text("Billing History", style = MaterialTheme.typography.titleMedium)
+                if (profileOccurrences.isEmpty()) {
+                    Text("No billing history found.")
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        profileOccurrences.forEach { occ ->
+                            val monthLabel = remember(occ) {
+                                java.time.YearMonth.of(occ.billingYear, occ.billingMonth).format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))
+                            }
+                            Card(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column {
+                                        Text(monthLabel, style = MaterialTheme.typography.bodyMedium)
+                                        Text(
+                                            if (occ.amountMinor != null) formatPkr(occ.amountMinor) else "Amount not entered",
+                                            style = MaterialTheme.typography.bodySmall
+                                        )
+                                    }
+                                    StatusChip(occ.status)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { showEditProfile = true }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Filled.Edit, "Edit")
+                        Spacer(Modifier.width(4.dp))
+                        Text("Edit")
+                    }
+                    if (profile.status == "ACTIVE") {
+                        Button(
+                            onClick = { vm.archiveUtilityProfile(profile.id); onDismiss() },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Filled.Archive, "Archive")
+                            Spacer(Modifier.width(4.dp))
+                            Text("Archive")
+                        }
+                    } else {
+                        Button(
+                            onClick = { showAddHistorical = true },
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(Icons.Filled.Unarchive, "Reactivate")
+                            Spacer(Modifier.width(4.dp))
+                            Text("Reactivate")
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { showAddHistorical = true }, modifier = Modifier.weight(1f)) {
+                        Text("Add Month")
+                    }
+                    OutlinedButton(
+                        onClick = { showDeleteConfirm = true },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                    ) {
+                        Icon(Icons.Filled.Delete, "Delete")
+                        Spacer(Modifier.width(4.dp))
+                        Text("Delete")
+                    }
+                }
+                TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
+                    Text("Close")
+                }
+            }
+        }
+    )
+
+    if (showEditProfile) {
+        AddBillDialog(vm, application, profileToEdit = profile) {
+            showEditProfile = false
+            onDismiss()
+        }
+    }
+
+    if (showAddHistorical) {
+        if (profile.status == "ARCHIVED") {
+            ReactivateProfileDialog(profile, vm, onDismiss = { showAddHistorical = false; onDismiss() })
+        } else {
+            AddHistoricalOccurrenceDialog(profile, vm, onDismiss = { showAddHistorical = false })
+        }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete Utility Connection?") },
+            text = { Text("This permanently deletes the connection profile '${profile.name}' and all its occurrences, payments, and attachments. This cannot be undone.") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        vm.deleteUtilityProfile(profile.id)
+                        showDeleteConfirm = false
+                        onDismiss()
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete Everything")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun ReactivateProfileDialog(
+    profile: UtilityBillProfileEntity,
+    vm: MainViewModel,
+    onDismiss: () -> Unit
+) {
+    var reactivateMonth by rememberSaveable { mutableStateOf(java.time.YearMonth.now().toString()) }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Reactivate Profile") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (errorMsg != null) {
+                    Text(errorMsg!!, color = MaterialTheme.colorScheme.error)
+                }
+                Text("Select the month from which to resume automatic bill generation.")
+                OutlinedTextField(reactivateMonth, { reactivateMonth = it }, label = { Text("Reactivation Month (YYYY-MM)") })
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                if (!runCatching { java.time.YearMonth.parse(reactivateMonth) }.isSuccess) {
+                    errorMsg = "Please enter month in YYYY-MM format."
+                    return@Button
+                }
+                vm.reactivateUtilityProfile(profile.id, reactivateMonth)
+                onDismiss()
+            }) {
+                Text("Reactivate")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun AddHistoricalOccurrenceDialog(
+    profile: UtilityBillProfileEntity,
+    vm: MainViewModel,
+    onDismiss: () -> Unit
+) {
+    var year by rememberSaveable { mutableStateOf(java.time.LocalDate.now().year.toString()) }
+    var month by rememberSaveable { mutableStateOf(java.time.LocalDate.now().monthValue.toString()) }
+    var amount by rememberSaveable { mutableStateOf("") }
+    var errorMsg by remember { mutableStateOf<String?>(null) }
+    val occurrences by vm.monthlyOccurrences.collectAsState()
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Add Historical Month") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (errorMsg != null) {
+                    Text(errorMsg!!, color = MaterialTheme.colorScheme.error)
+                }
+                OutlinedTextField(year, { year = it.filter(Char::isDigit) }, label = { Text("Year (YYYY)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                OutlinedTextField(month, { month = it.filter(Char::isDigit) }, label = { Text("Month (1-12)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                AmountField(amount, { amount = it }, "Expected Amount (PKR, optional)")
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                val yVal = year.toIntOrNull()
+                val mVal = month.toIntOrNull()
+                if (yVal == null || mVal == null || mVal !in 1..12) {
+                    errorMsg = "Please enter valid Year and Month (1-12)."
+                    return@Button
+                }
+                val duplicate = occurrences.any { it.profileId == profile.id && it.billingYear == yVal && it.billingMonth == mVal }
+                if (duplicate) {
+                    errorMsg = "An occurrence for $yVal-$mVal already exists."
+                    return@Button
+                }
+                val (issueDate, dueDate) = UtilityRecurrenceEngine.calculateDates(yVal, mVal, profile.issueDayAnchor, profile.dueDayAnchor)
+                val amtMinor = amount.takeIf { it.isNotBlank() }?.let { PkrMoneyInput.toMinorUnits(it, false) }
+                val now = System.currentTimeMillis()
+                val occ = MonthlyBillOccurrenceEntity(
+                    id = UUID.randomUUID().toString(),
+                    profileId = profile.id,
+                    billingYear = yVal,
+                    billingMonth = mVal,
+                    expectedIssueDateEpochDay = issueDate.toEpochDay(),
+                    expectedDueDateEpochDay = dueDate.toEpochDay(),
+                    actualIssueDateEpochDay = null,
+                    actualDueDateEpochDay = null,
+                    amountMinor = amtMinor,
+                    status = "Pending",
+                    notes = "Manually added historical month",
+                    creationSource = "Manual",
+                    createdAtEpochMillis = now,
+                    updatedAtEpochMillis = now
+                )
+                vm.addMonthlyOccurrence(occ)
+                onDismiss()
+            }) {
+                Text("Add")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
     )
 }

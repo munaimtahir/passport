@@ -11,11 +11,103 @@ import androidx.compose.runtime.mutableStateOf
 import pk.vexel.financepassport.core.database.AccountEntity
 import pk.vexel.financepassport.core.database.FinanceRepository
 import pk.vexel.financepassport.core.database.FinancialEventEntity
+import pk.vexel.financepassport.core.database.UtilityBillProfileEntity
+import pk.vexel.financepassport.core.database.MonthlyBillOccurrenceEntity
+import pk.vexel.financepassport.core.database.PaymentRecordEntity
+import pk.vexel.financepassport.core.database.BillAttachmentEntity
+import pk.vexel.financepassport.core.database.UtilityRecurrenceEngine
 import pk.vexel.financepassport.core.model.FinancialEventType
 import pk.vexel.financepassport.core.security.AppPreferences
 import java.time.LocalDate
 
 class MainViewModel(private val repository: FinanceRepository, private val preferences: AppPreferences) : ViewModel() {
+    init {
+        viewModelScope.launch {
+            runCatching {
+                UtilityRecurrenceEngine.reconcileAll(repository.database, LocalDate.now())
+            }
+        }
+    }
+
+    val utilityProfiles = repository.utilityProfiles.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val monthlyOccurrences = repository.monthlyOccurrences.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun addUtilityProfile(profile: UtilityBillProfileEntity) = write {
+        repository.addUtilityProfile(profile)
+        UtilityRecurrenceEngine.reconcileProfile(repository.database, profile, LocalDate.now())
+    }
+
+    fun updateUtilityProfile(profile: UtilityBillProfileEntity) = write {
+        repository.updateUtilityProfile(profile)
+        UtilityRecurrenceEngine.reconcileProfile(repository.database, profile, LocalDate.now())
+    }
+
+    fun archiveUtilityProfile(id: String) = write {
+        repository.archiveUtilityProfile(id, System.currentTimeMillis())
+    }
+
+    fun reactivateUtilityProfile(id: String, reactivateMonth: String) = write {
+        val now = System.currentTimeMillis()
+        repository.reactivateUtilityProfile(id, reactivateMonth, now)
+        repository.database.utilityBillDao().getById(id)?.let { profile ->
+            UtilityRecurrenceEngine.reconcileProfile(repository.database, profile, LocalDate.now())
+        }
+    }
+
+    fun deleteUtilityProfile(id: String) = write {
+        repository.deleteUtilityProfile(id)
+    }
+
+    fun addMonthlyOccurrence(occurrence: MonthlyBillOccurrenceEntity) = write {
+        repository.addMonthlyOccurrence(occurrence)
+    }
+
+    fun updateMonthlyOccurrence(occurrence: MonthlyBillOccurrenceEntity) = write {
+        repository.updateMonthlyOccurrence(occurrence)
+    }
+
+    fun deleteMonthlyOccurrence(id: String) = write {
+        repository.deleteMonthlyOccurrence(id)
+    }
+
+    fun addPayment(payment: PaymentRecordEntity) = write {
+        repository.addPayment(payment)
+        // Re-reconcile profile to update occurrence status to Paid
+        repository.database.monthlyBillOccurrenceDao().getById(payment.occurrenceId)?.let { occ ->
+            repository.database.utilityBillDao().getById(occ.profileId)?.let { profile ->
+                UtilityRecurrenceEngine.reconcileProfile(repository.database, profile, LocalDate.now())
+            }
+        }
+    }
+
+    fun updatePayment(id: String, occurrenceId: String, amountPaid: Long, paymentDate: Long, mode: String, bank: String?, reference: String?, notes: String?) = write {
+        repository.updatePayment(id, amountPaid, paymentDate, mode, bank, reference, notes, System.currentTimeMillis())
+        repository.database.monthlyBillOccurrenceDao().getById(occurrenceId)?.let { occ ->
+            repository.database.utilityBillDao().getById(occ.profileId)?.let { profile ->
+                UtilityRecurrenceEngine.reconcileProfile(repository.database, profile, LocalDate.now())
+            }
+        }
+    }
+
+    fun deletePayment(id: String, occurrenceId: String) = write {
+        repository.deletePayment(id)
+        repository.database.monthlyBillOccurrenceDao().getById(occurrenceId)?.let { occ ->
+            repository.database.utilityBillDao().getById(occ.profileId)?.let { profile ->
+                UtilityRecurrenceEngine.reconcileProfile(repository.database, profile, LocalDate.now())
+            }
+        }
+    }
+
+    fun addAttachment(attachment: BillAttachmentEntity) = write {
+        repository.addAttachment(attachment)
+    }
+
+    fun deleteAttachment(id: String) = write {
+        repository.deleteAttachment(id)
+    }
+
+    fun observeAttachments(linkedId: String) = repository.observeAttachments(linkedId)
+
     var privacyModeEnabled by mutableStateOf(preferences.isPrivacyModeEnabled())
         private set
     fun togglePrivacyMode() {
@@ -56,6 +148,10 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
 
     private fun write(action: suspend () -> Unit) = viewModelScope.launch {
         runCatching { action() }.onFailure { errorMessage = "Could not save this change. Check the fields and try again." }
+    }
+
+    suspend fun getPaymentForOccurrence(occurrenceId: String): PaymentRecordEntity? {
+        return repository.database.paymentRecordDao().getForOccurrence(occurrenceId)
     }
 
     fun addAccount(name: String, type: String, openingBalanceMinor: Long, institution: String? = null, notes: String? = null) = write { repository.addAccount(name, type, openingBalanceMinor, institution = institution, notes = notes) }
