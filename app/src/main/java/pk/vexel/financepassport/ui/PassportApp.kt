@@ -278,7 +278,7 @@ private fun HomeScreen(vm: MainViewModel, application: PassportApplication, padd
         totalPaidThisMonth = total
     }
 
-    var selectedProfileForDetails by remember { mutableStateOf<UtilityBillProfileEntity?>(null) }
+    var selectedOccurrenceForDetails by remember { mutableStateOf<MonthlyBillOccurrenceEntity?>(null) }
 
     Column(
         Modifier
@@ -350,7 +350,7 @@ private fun HomeScreen(vm: MainViewModel, application: PassportApplication, padd
                             val monthLabel = java.time.YearMonth.of(occ.billingYear, occ.billingMonth).format(java.time.format.DateTimeFormatter.ofPattern("MMM yyyy"))
                             val dueDateStr = java.time.LocalDate.ofEpochDay(occ.expectedDueDateEpochDay).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))
                             Card(
-                                onClick = { selectedProfileForDetails = profile },
+                                onClick = { selectedOccurrenceForDetails = occ },
                                 modifier = Modifier.fillMaxWidth().testTag("pending-card-${occ.id}")
                             ) {
                                 Row(
@@ -380,8 +380,8 @@ private fun HomeScreen(vm: MainViewModel, application: PassportApplication, padd
         }
     }
 
-    selectedProfileForDetails?.let { profile ->
-        UtilityProfileDetailsDialog(profile, vm, application, onDismiss = { selectedProfileForDetails = null })
+    selectedOccurrenceForDetails?.let { occ ->
+        MonthlyOccurrenceDetailsDialog(occ, vm, application, onDismiss = { selectedOccurrenceForDetails = null })
     }
 }
 
@@ -1375,6 +1375,7 @@ private fun UtilityProfileDetailsDialog(
     var showEditProfile by remember { mutableStateOf(false) }
     var showAddHistorical by remember { mutableStateOf(false) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
+    var selectedOccurrenceForDetails by remember { mutableStateOf<MonthlyBillOccurrenceEntity?>(null) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1425,7 +1426,10 @@ private fun UtilityProfileDetailsDialog(
                             val monthLabel = remember(occ) {
                                 java.time.YearMonth.of(occ.billingYear, occ.billingMonth).format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))
                             }
-                            Card(modifier = Modifier.fillMaxWidth()) {
+                            Card(
+                                onClick = { selectedOccurrenceForDetails = occ },
+                                modifier = Modifier.fillMaxWidth().testTag("history-occ-${occ.id}")
+                            ) {
                                 Row(
                                     Modifier
                                         .fillMaxWidth()
@@ -1536,6 +1540,10 @@ private fun UtilityProfileDetailsDialog(
             }
         )
     }
+
+    selectedOccurrenceForDetails?.let { occ ->
+        MonthlyOccurrenceDetailsDialog(occ, vm, application, onDismiss = { selectedOccurrenceForDetails = null })
+    }
 }
 
 @Composable
@@ -1642,6 +1650,256 @@ private fun AddHistoricalOccurrenceDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MonthlyOccurrenceDetailsDialog(
+    occurrence: MonthlyBillOccurrenceEntity,
+    vm: MainViewModel,
+    application: PassportApplication,
+    onDismiss: () -> Unit
+) {
+    val profiles by vm.utilityProfiles.collectAsState()
+    val profile = remember(profiles, occurrence) { profiles.find { it.id == occurrence.profileId } }
+    if (profile == null) {
+        onDismiss()
+        return
+    }
+
+    var actualIssueDate by remember { mutableStateOf(occurrence.actualIssueDateEpochDay?.let { java.time.LocalDate.ofEpochDay(it) } ?: java.time.LocalDate.ofEpochDay(occurrence.expectedIssueDateEpochDay)) }
+    var setActualIssueDate by remember { mutableStateOf(occurrence.actualIssueDateEpochDay != null) }
+
+    var actualDueDate by remember { mutableStateOf(occurrence.actualDueDateEpochDay?.let { java.time.LocalDate.ofEpochDay(it) } ?: java.time.LocalDate.ofEpochDay(occurrence.expectedDueDateEpochDay)) }
+    var setActualDueDate by remember { mutableStateOf(occurrence.actualDueDateEpochDay != null) }
+
+    var billAmount by remember { mutableStateOf(occurrence.amountMinor?.let { (it / 100).toString() } ?: "") }
+
+    var showPayForm by remember { mutableStateOf(false) }
+    var showSkipForm by remember { mutableStateOf(false) }
+
+    // Payment Form state variables
+    var payAmount by remember { mutableStateOf(billAmount) }
+    var paymentDate by remember { mutableStateOf(java.time.LocalDate.now()) }
+    var paymentMode by remember { mutableStateOf("Bank Transfer") }
+    var bankName by remember { mutableStateOf("") }
+    var transactionReference by remember { mutableStateOf("") }
+    var payNotes by remember { mutableStateOf("") }
+
+    // Skip notes
+    var skipNotes by remember { mutableStateOf("") }
+
+    var paymentRecord by remember { mutableStateOf<PaymentRecordEntity?>(null) }
+    LaunchedEffect(occurrence) {
+        paymentRecord = vm.getPaymentForOccurrence(occurrence.id)
+    }
+
+    val monthLabel = remember(occurrence) {
+        java.time.YearMonth.of(occurrence.billingYear, occurrence.billingMonth).format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("${profile.name} - $monthLabel")
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                if (showPayForm) {
+                    Text("Record Payment", style = MaterialTheme.typography.titleMedium)
+                    AmountField(payAmount, { payAmount = it }, "Amount Paid (PKR)", modifier = Modifier.testTag("pay-amount"))
+                    DateField("Payment Date", paymentDate, { paymentDate = it }, testTag = "pay-date")
+
+                    Text("Payment Mode")
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("Cash", "Bank Transfer", "Card", "Mobile Wallet", "Other").forEach { mode ->
+                            FilterChip(
+                                selected = paymentMode == mode,
+                                onClick = { paymentMode = mode },
+                                label = { Text(mode) },
+                                modifier = Modifier.testTag("chip-paymode-$mode")
+                            )
+                        }
+                    }
+
+                    OutlinedTextField(bankName, { bankName = it }, label = { Text("Bank Name (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("pay-bank"))
+                    OutlinedTextField(transactionReference, { transactionReference = it }, label = { Text("Transaction Reference (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("pay-ref"))
+                    OutlinedTextField(payNotes, { payNotes = it }, label = { Text("Notes (optional)") }, modifier = Modifier.fillMaxWidth().testTag("pay-notes"))
+                } else if (showSkipForm) {
+                    Text("Mark as Skipped", style = MaterialTheme.typography.titleMedium)
+                    OutlinedTextField(skipNotes, { skipNotes = it }, label = { Text("Reason / Notes for skipping") }, modifier = Modifier.fillMaxWidth().testTag("skip-notes"))
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("Expected Issue: ${java.time.LocalDate.ofEpochDay(occurrence.expectedIssueDateEpochDay).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))}")
+                        Text("Expected Due: ${java.time.LocalDate.ofEpochDay(occurrence.expectedDueDateEpochDay).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))}")
+                        Text("Creation Source: ${occurrence.creationSource}")
+                        Text("Current Status: ${occurrence.status}")
+                    }
+
+                    if (paymentRecord != null) {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Payment Details", style = MaterialTheme.typography.titleMedium)
+                                Text("Amount Paid: ${formatPkr(paymentRecord!!.amountPaidMinor)}")
+                                Text("Date Paid: ${java.time.LocalDate.ofEpochDay(paymentRecord!!.paymentDateEpochDay).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))}")
+                                Text("Mode: ${paymentRecord!!.paymentMode}")
+                                if (paymentRecord!!.bankName != null) Text("Bank: ${paymentRecord!!.bankName}")
+                                if (paymentRecord!!.transactionReference != null) Text("Reference: ${paymentRecord!!.transactionReference}")
+                                if (paymentRecord!!.notes != null) Text("Notes: ${paymentRecord!!.notes}")
+                            }
+                        }
+                    } else if (occurrence.status == "Skipped") {
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("Skipped Occurrence", style = MaterialTheme.typography.titleMedium)
+                                if (occurrence.notes != null) Text("Notes: ${occurrence.notes}")
+                            }
+                        }
+                    } else {
+                        Text("Billing Parameters", style = MaterialTheme.typography.titleMedium)
+                        
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            androidx.compose.material3.Checkbox(checked = setActualIssueDate, onCheckedChange = { setActualIssueDate = it })
+                            Text("Override Actual Issue Date")
+                        }
+                        if (setActualIssueDate) {
+                            DateField("Actual Issue Date", actualIssueDate, { actualIssueDate = it }, testTag = "actual-issue-date")
+                        }
+
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            androidx.compose.material3.Checkbox(checked = setActualDueDate, onCheckedChange = { setActualDueDate = it })
+                            Text("Override Actual Due Date")
+                        }
+                        if (setActualDueDate) {
+                            DateField("Actual Due Date", actualDueDate, { actualDueDate = it }, testTag = "actual-due-date")
+                        }
+
+                        AmountField(billAmount, { billAmount = it }, "Expected/Actual Bill Amount (PKR)", modifier = Modifier.testTag("bill-amount"))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (showPayForm) {
+                Button(
+                    onClick = {
+                        val amtPaidMinor = PkrMoneyInput.toMinorUnits(payAmount, false)
+                        val payment = PaymentRecordEntity(
+                            id = UUID.randomUUID().toString(),
+                            occurrenceId = occurrence.id,
+                            amountPaidMinor = amtPaidMinor,
+                            paymentDateEpochDay = paymentDate.toEpochDay(),
+                            paymentMode = paymentMode,
+                            bankName = bankName.trim().takeIf { it.isNotEmpty() },
+                            transactionReference = transactionReference.trim().takeIf { it.isNotEmpty() },
+                            notes = payNotes.trim().takeIf { it.isNotEmpty() },
+                            createdAtEpochMillis = System.currentTimeMillis(),
+                            updatedAtEpochMillis = System.currentTimeMillis()
+                        )
+                        vm.addPayment(payment)
+                        val finalAmtMinor = billAmount.takeIf { it.isNotBlank() }?.let { PkrMoneyInput.toMinorUnits(it, false) } ?: amtPaidMinor
+                        vm.updateMonthlyOccurrence(occurrence.copy(
+                            actualIssueDateEpochDay = actualIssueDate.toEpochDay().takeIf { setActualIssueDate },
+                            actualDueDateEpochDay = actualDueDate.toEpochDay().takeIf { setActualDueDate },
+                            amountMinor = finalAmtMinor,
+                            status = "Paid",
+                            updatedAtEpochMillis = System.currentTimeMillis()
+                        ))
+                        onDismiss()
+                    },
+                    enabled = runCatching { PkrMoneyInput.parseRupees(payAmount, false) }.isSuccess && PkrMoneyInput.toMinorUnits(payAmount, false) > 0,
+                    modifier = Modifier.testTag("save-payment-button")
+                ) {
+                    Text("Save Payment")
+                }
+            } else if (showSkipForm) {
+                Button(
+                    onClick = {
+                        vm.updateMonthlyOccurrence(occurrence.copy(
+                            status = "Skipped",
+                            notes = skipNotes.trim().takeIf { it.isNotEmpty() } ?: "Skipped",
+                            updatedAtEpochMillis = System.currentTimeMillis()
+                        ))
+                        onDismiss()
+                    },
+                    modifier = Modifier.testTag("save-skip-button")
+                ) {
+                    Text("Skip Occurrence")
+                }
+            } else {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (paymentRecord != null) {
+                        Button(
+                            onClick = {
+                                vm.deletePayment(paymentRecord!!.id, occurrence.id)
+                                onDismiss()
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+                            modifier = Modifier.weight(1f).testTag("delete-payment-button")
+                        ) {
+                            Text("Delete Payment")
+                        }
+                    } else if (occurrence.status == "Skipped") {
+                        Button(
+                            onClick = {
+                                vm.updateMonthlyOccurrence(occurrence.copy(
+                                    status = "Pending",
+                                    notes = null,
+                                    updatedAtEpochMillis = System.currentTimeMillis()
+                                ))
+                                onDismiss()
+                            },
+                            modifier = Modifier.weight(1f).testTag("unskip-button")
+                        ) {
+                            Text("Revert Skip")
+                        }
+                    } else {
+                        Button(onClick = { showPayForm = true; payAmount = billAmount }, modifier = Modifier.weight(1f).testTag("pay-button")) {
+                            Text("Mark Paid")
+                        }
+                        Button(onClick = { showSkipForm = true }, modifier = Modifier.weight(1f).testTag("skip-button")) {
+                            Text("Skip Month")
+                        }
+                        Button(
+                            onClick = {
+                                val amtMinor = billAmount.takeIf { it.isNotBlank() }?.let { PkrMoneyInput.toMinorUnits(it, false) }
+                                vm.updateMonthlyOccurrence(occurrence.copy(
+                                    actualIssueDateEpochDay = actualIssueDate.toEpochDay().takeIf { setActualIssueDate },
+                                    actualDueDateEpochDay = actualDueDate.toEpochDay().takeIf { setActualDueDate },
+                                    amountMinor = amtMinor,
+                                    updatedAtEpochMillis = System.currentTimeMillis()
+                                ))
+                                onDismiss()
+                            },
+                            modifier = Modifier.weight(1f).testTag("save-occurrence-button")
+                        ) {
+                            Text("Save")
+                        }
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = {
+                    if (showPayForm) {
+                        showPayForm = false
+                    } else if (showSkipForm) {
+                        showSkipForm = false
+                    } else {
+                        onDismiss()
+                    }
+                }
+            ) {
+                Text(if (showPayForm || showSkipForm) "Back" else "Cancel")
+            }
         }
     )
 }
