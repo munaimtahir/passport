@@ -58,6 +58,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Scaffold
@@ -1187,11 +1188,218 @@ private fun BillsScreen(vm: MainViewModel, application: PassportApplication, pad
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HistoryScreen(vm: MainViewModel, application: PassportApplication, padding: PaddingValues) {
-    Column(Modifier.fillMaxSize().padding(padding).padding(24.dp), Arrangement.spacedBy(12.dp)) {
-        Text("History", style = MaterialTheme.typography.headlineMedium)
-        Text("Search and view past bill occurrences and payment history.")
+    val profiles by vm.utilityProfiles.collectAsState()
+    val occurrences by vm.monthlyOccurrences.collectAsState()
+    val context = LocalContext.current
+
+    var searchQuery by rememberSaveable { mutableStateOf("") }
+    var selectedStatus by rememberSaveable { mutableStateOf("All") }
+    var selectedCategory by rememberSaveable { mutableStateOf("All") }
+    var selectedYear by rememberSaveable { mutableStateOf("All") }
+    var selectedPaymentMode by rememberSaveable { mutableStateOf("All") }
+
+    var selectedOccurrenceForDetails by remember { mutableStateOf<MonthlyBillOccurrenceEntity?>(null) }
+
+    var paymentsMap by remember { mutableStateOf<Map<String, PaymentRecordEntity>>(emptyMap()) }
+    LaunchedEffect(occurrences) {
+        val map = mutableMapOf<String, PaymentRecordEntity>()
+        for (occ in occurrences) {
+            val pay = vm.getPaymentForOccurrence(occ.id)
+            if (pay != null) {
+                map[occ.id] = pay
+            }
+        }
+        paymentsMap = map
+    }
+
+    val filteredOccurrences = remember(occurrences, profiles, paymentsMap, searchQuery, selectedStatus, selectedCategory, selectedYear, selectedPaymentMode) {
+        occurrences.filter { occ ->
+            val profile = profiles.find { it.id == occ.profileId } ?: return@filter false
+            val payment = paymentsMap[occ.id]
+
+            val matchesSearch = profile.name.contains(searchQuery, ignoreCase = true) ||
+                    profile.referenceNumber.contains(searchQuery, ignoreCase = true) ||
+                    (profile.provider ?: "").contains(searchQuery, ignoreCase = true) ||
+                    (payment?.transactionReference ?: "").contains(searchQuery, ignoreCase = true) ||
+                    (payment?.bankName ?: "").contains(searchQuery, ignoreCase = true)
+
+            val matchesStatus = selectedStatus == "All" || occ.status.equals(selectedStatus, ignoreCase = true)
+
+            val matchesCategory = selectedCategory == "All" || profile.category.equals(selectedCategory, ignoreCase = true)
+
+            val matchesYear = selectedYear == "All" || occ.billingYear.toString() == selectedYear
+
+            val matchesPaymentMode = selectedPaymentMode == "All" || (payment != null && payment.paymentMode.equals(selectedPaymentMode, ignoreCase = true))
+
+            matchesSearch && matchesStatus && matchesCategory && matchesYear && matchesPaymentMode
+        }.sortedWith(compareByDescending<MonthlyBillOccurrenceEntity> { it.billingYear }.thenByDescending { it.billingMonth })
+    }
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Text("Global Bill & Payment History", style = MaterialTheme.typography.headlineMedium)
+
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = { searchQuery = it },
+            label = { Text("Search by reference, provider, bank, or transaction ref") },
+            leadingIcon = { Icon(Icons.Default.Search, "Search") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().testTag("history-search")
+        )
+
+        Text("Filters", style = MaterialTheme.typography.titleMedium)
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box {
+                var expanded by remember { mutableStateOf(false) }
+                OutlinedButton(onClick = { expanded = true }, modifier = Modifier.testTag("filter-status-button")) {
+                    Text("Status: $selectedStatus")
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    listOf("All", "Paid", "Pending", "Overdue", "Skipped").forEach { opt ->
+                        DropdownMenuItem(
+                            text = { Text(opt) },
+                            onClick = { selectedStatus = opt; expanded = false },
+                            modifier = Modifier.testTag("filter-status-opt-$opt")
+                        )
+                    }
+                }
+            }
+
+            Box {
+                var expanded by remember { mutableStateOf(false) }
+                OutlinedButton(onClick = { expanded = true }, modifier = Modifier.testTag("filter-category-button")) {
+                    Text("Category: $selectedCategory")
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    listOf("All", "Electricity", "Gas", "Water", "Internet", "Telephone", "Other").forEach { opt ->
+                        DropdownMenuItem(
+                            text = { Text(opt) },
+                            onClick = { selectedCategory = opt; expanded = false },
+                            modifier = Modifier.testTag("filter-category-opt-$opt")
+                        )
+                    }
+                }
+            }
+
+            Box {
+                var expanded by remember { mutableStateOf(false) }
+                OutlinedButton(onClick = { expanded = true }, modifier = Modifier.testTag("filter-year-button")) {
+                    Text("Year: $selectedYear")
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    val years = remember(occurrences) {
+                        listOf("All") + occurrences.map { it.billingYear.toString() }.distinct().sortedDescending()
+                    }
+                    years.forEach { opt ->
+                        DropdownMenuItem(
+                            text = { Text(opt) },
+                            onClick = { selectedYear = opt; expanded = false },
+                            modifier = Modifier.testTag("filter-year-opt-$opt")
+                        )
+                    }
+                }
+            }
+
+            Box {
+                var expanded by remember { mutableStateOf(false) }
+                OutlinedButton(onClick = { expanded = true }, modifier = Modifier.testTag("filter-paymode-button")) {
+                    Text("Mode: $selectedPaymentMode")
+                }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    listOf("All", "Cash", "Bank Transfer", "Card", "Mobile Wallet", "Other").forEach { opt ->
+                        DropdownMenuItem(
+                            text = { Text(opt) },
+                            onClick = { selectedPaymentMode = opt; expanded = false },
+                            modifier = Modifier.testTag("filter-paymode-opt-$opt")
+                        )
+                    }
+                }
+            }
+
+            if (searchQuery.isNotEmpty() || selectedStatus != "All" || selectedCategory != "All" || selectedYear != "All" || selectedPaymentMode != "All") {
+                TextButton(
+                    onClick = {
+                        searchQuery = ""
+                        selectedStatus = "All"
+                        selectedCategory = "All"
+                        selectedYear = "All"
+                        selectedPaymentMode = "All"
+                    },
+                    modifier = Modifier.testTag("filter-reset")
+                ) {
+                    Text("Reset")
+                }
+            }
+        }
+
+        if (filteredOccurrences.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No bills or payments match the filters.", style = MaterialTheme.typography.bodyMedium)
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().testTag("history-list"),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                items(filteredOccurrences, key = { it.id }) { occ ->
+                    val profile = profiles.find { it.id == occ.profileId }
+                    if (profile != null) {
+                        val payment = paymentsMap[occ.id]
+                        val monthLabel = java.time.YearMonth.of(occ.billingYear, occ.billingMonth).format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))
+                        Card(
+                            onClick = { selectedOccurrenceForDetails = occ },
+                            modifier = Modifier.fillMaxWidth().testTag("history-item-${occ.id}")
+                        ) {
+                            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        CategoryIcon(profile.category, modifier = Modifier.size(24.dp))
+                                        Text(profile.name, style = MaterialTheme.typography.titleMedium)
+                                    }
+                                    StatusChip(occ.status)
+                                }
+                                Text(monthLabel, style = MaterialTheme.typography.bodyMedium)
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text("Ref: ${maskReferenceNumber(profile.referenceNumber)}", style = MaterialTheme.typography.bodySmall)
+                                    Text(
+                                        if (occ.amountMinor != null) formatPkr(occ.amountMinor) else "Amount TBD",
+                                        style = MaterialTheme.typography.titleSmall
+                                    )
+                                }
+                                if (payment != null) {
+                                    val payDateStr = java.time.LocalDate.ofEpochDay(payment.paymentDateEpochDay).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))
+                                    Text(
+                                        "Paid: ${formatPkr(payment.amountPaidMinor)} on $payDateStr via ${payment.paymentMode}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    selectedOccurrenceForDetails?.let { occ ->
+        MonthlyOccurrenceDetailsDialog(occ, vm, application, onDismiss = { selectedOccurrenceForDetails = null })
     }
 }
 
