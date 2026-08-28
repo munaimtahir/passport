@@ -893,7 +893,6 @@ private fun HistoryScreen(vm: MainViewModel, application: PassportApplication, p
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var selectedStatus by rememberSaveable { mutableStateOf("All") }
     var selectedCategory by rememberSaveable { mutableStateOf("All") }
-    var selectedYear by rememberSaveable { mutableStateOf("All") }
 
     var selectedOccurrenceForDetails by remember { mutableStateOf<MonthlyBillOccurrenceEntity?>(null) }
 
@@ -921,12 +920,12 @@ private fun HistoryScreen(vm: MainViewModel, application: PassportApplication, p
             Box {
                 var expanded by remember { mutableStateOf(false) }
                 OutlinedButton(onClick = { expanded = true }, modifier = Modifier.testTag("filter-status-button")) {
-                    Text("Status: $selectedStatus")
+                    Text("Type: $selectedStatus")
                 }
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    listOf("All", "Paid", "Pending", "Overdue", "Skipped").forEach { opt ->
+                    listOf("All", "INCOME", "EXPENSE", "TRANSFER").forEach { opt ->
                         DropdownMenuItem(
-                            text = { Text(opt) },
+                            text = { Text(if (opt == "All") "All Types" else opt.lowercase().replaceFirstChar(Char::uppercase)) },
                             onClick = { selectedStatus = opt; expanded = false },
                             modifier = Modifier.testTag("filter-status-opt-$opt"),
                         )
@@ -962,12 +961,13 @@ private fun HistoryScreen(vm: MainViewModel, application: PassportApplication, p
             }
         }
 
-        val filteredEvents = remember(recentEvents, searchQuery, selectedCategory) {
+        val filteredEvents = remember(recentEvents, searchQuery, selectedCategory, selectedStatus) {
             recentEvents.filter { event ->
                 val matchesSearch = event.description.contains(searchQuery, ignoreCase = true) ||
                     (event.category ?: "").contains(searchQuery, ignoreCase = true)
                 val matchesCategory = selectedCategory == "All" || (event.category ?: "").equals(selectedCategory, ignoreCase = true)
-                matchesSearch && matchesCategory
+                val matchesStatus = selectedStatus == "All" || event.eventType.equals(selectedStatus, ignoreCase = true)
+                matchesSearch && matchesCategory && matchesStatus
             }
         }
 
@@ -1233,7 +1233,7 @@ private fun IncomeSourcePicker(sources: List<pk.vexel.financepassport.core.datab
     var expanded by remember { mutableStateOf(false) }
     val selected = sources.firstOrNull { it.id == selectedId }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
-        OutlinedTextField(selected?.name.orEmpty(), {}, readOnly = true, label = { Text("Income source (optional)") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) }, modifier = Modifier.menuAnchor().fillMaxWidth().testTag("income-source-picker"))
+        OutlinedTextField(selected?.name.orEmpty(), {}, readOnly = true, label = { Text("Income source (optional)") }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) }, modifier = Modifier.menuAnchor(androidx.compose.material3.ExposedDropdownMenuAnchorType.PrimaryNotEditable, true).fillMaxWidth().testTag("income-source-picker"))
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(text = { Text("None") }, onClick = { onSelected(null); expanded = false }, modifier = Modifier.testTag("income-source-none"))
             sources.forEach { source -> DropdownMenuItem(text = { Text(source.name) }, onClick = { onSelected(source.id); expanded = false }, modifier = Modifier.testTag("income-source-${source.id}")) }
@@ -1247,7 +1247,7 @@ private fun AccountPicker(label: String, accounts: List<AccountEntity>, selected
     var expanded by remember { mutableStateOf(false) }
     val selected = accounts.firstOrNull { it.id == selectedId }
     ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = !expanded }) {
-        OutlinedTextField(selected?.name.orEmpty(), {}, readOnly = true, label = { Text(label) }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) }, modifier = Modifier.menuAnchor().fillMaxWidth())
+        OutlinedTextField(selected?.name.orEmpty(), {}, readOnly = true, label = { Text(label) }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) }, modifier = Modifier.menuAnchor(androidx.compose.material3.ExposedDropdownMenuAnchorType.PrimaryNotEditable, true).fillMaxWidth())
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             accounts.forEach { account -> DropdownMenuItem(text = { Text(account.name) }, onClick = { onSelected(account.id); expanded = false }) }
         }
@@ -1514,9 +1514,12 @@ private fun UtilityProfileDetailsDialog(
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Column {
+                                        val isMasked = LocalPrivacyMode.current
                                         Text(monthLabel, style = MaterialTheme.typography.bodyMedium)
                                         Text(
-                                            if (occ.amountMinor != null) PkrMoneyInput.formatMinorUnits(occ.amountMinor) else "Amount not entered",
+                                            if (isMasked) "PKR ••••••"
+                                            else if (occ.amountMinor != null) PkrMoneyInput.formatMinorUnits(occ.amountMinor)
+                                            else "Amount not entered",
                                             style = MaterialTheme.typography.bodySmall,
                                         )
                                     }
@@ -1780,10 +1783,11 @@ private fun MonthlyOccurrenceDetailsDialog(
                     }
 
                     if (paymentRecord != null) {
+                        val isMasked = LocalPrivacyMode.current
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("Payment Details", style = MaterialTheme.typography.titleMedium)
-                                Text("Amount Paid: ${PkrMoneyInput.formatMinorUnits(paymentRecord!!.amountPaidMinor)}")
+                                Text("Amount Paid: ${if (isMasked) "PKR ••••••" else PkrMoneyInput.formatMinorUnits(paymentRecord!!.amountPaidMinor)}")
                                 Text("Date Paid: ${LocalDate.ofEpochDay(paymentRecord!!.paymentDateEpochDay).format(DateTimeFormatter.ofPattern("d MMM yyyy"))}")
                                 Text("Mode: ${paymentRecord!!.paymentMode}")
                                 Text("Paid from: ${activeAccounts.firstOrNull { it.id == paymentRecord!!.accountId }?.name ?: "Cash / Unlinked"}")

@@ -114,7 +114,7 @@ fun VexelCaptureTraySheet(
             )
 
             CaptureOptionRow(
-                icon = Icons.Filled.ArrowUpward, // SwapHoriz icon can be used
+                icon = Icons.Filled.SwapHoriz,
                 title = "Account Transfer",
                 subtitle = "Move money between cash/bank accounts",
                 enabled = hasAccounts,
