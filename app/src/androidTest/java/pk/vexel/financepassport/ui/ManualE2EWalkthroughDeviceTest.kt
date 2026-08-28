@@ -51,6 +51,15 @@ class ManualE2EWalkthroughDeviceTest {
     fun fullSessionFromOnboardingThroughPayingABillAndBackupSettings() {
         unlockIfNeeded()
 
+        // Create an active account in Money first (required by Sprint 24 unified ledger).
+        composeRule.onNodeWithText("Money", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("add-account", useUnmergedTree = true).performClick()
+        waitForTag("account-name")
+        composeRule.onNodeWithTag("account-name", useUnmergedTree = true).performTextInput("HBL Personal")
+        composeRule.onNodeWithTag("account-amount", useUnmergedTree = true).performTextInput("100000")
+        composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
+        waitFor("HBL Personal")
+
         // Register a bill.
         composeRule.onNodeWithText("Bills", useUnmergedTree = true).performClick()
         composeRule.onNodeWithTag("add-bill-fab", useUnmergedTree = true).performClick()

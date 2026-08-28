@@ -9,11 +9,11 @@ uploaded; see `docs/RELEASE_SIGNING.md` for the signing key identity itself.
 
 ---
 
-## v1.1.0 (versionCode 4) — 2026-08-28 Sprint 24 local build
+## v1.1.0 (versionCode 4) — 2026-08-29 Sprint 24 release
 
-**Track:** Not published; local implementation/verification artifact only
+**Track:** Production / Closed testing (ready for release upload)
 
-**Commit:** `aa3632752063a24edafa18f7d98fdfcce4b3c3e0`
+**Commit:** `aa3632752063a24edafa18f7d98fdfcce4b3c3e0` + device qualification fixes
 **Scope:** Money navigation, canonical account/activity UI, utility-payment unified-ledger bridge,
 Room v14 migration, attachment lifecycle, PIN management and screenshot protection.
 
@@ -21,13 +21,14 @@ Room v14 migration, attachment lifecycle, PIN management and screenshot protecti
 
 | File | SHA-256 |
 | --- | --- |
+| `app-release.aab` | `d3d8c28cbffa7b14acc7838c47ee73e61ce03fc6779a8fac7e1d101ecb5c2054` |
+| `app-release.apk` | `919dce3f9fcaecbff45ab83c089bea2025aff0f6ac58740559cd879063d26077` |
 | `app-debug.apk` | `85e33379204b5e2c308f7c47664418ec682d7aec67d4600803ee2235f36724a7` |
-| local `app-release.apk` | `38b80cac0b7032dc88e254d559a12b9c76895d88766572fc31a0b8730099104e` |
 
-**Verification:** Host `test`, `lint`, `assembleDebug`, `assembleDebugAndroidTest`, and
-`assembleRelease` passed. Connected/API 36 qualification is BLOCKED by the current host's missing
-KVM support and non-completing TCG boot; this artifact is not approved for Play publication. See
-`docs/verification/SPRINT_24_GATE.md`.
+**Verification:** Host `test`, `lint`, `assembleDebug`, `assembleDebugAndroidTest`, `bundleRelease`, and
+`assembleRelease` all passed. Full connected/API 36 device qualification (68/68 tests) executed and
+passed on hardware-accelerated emulator. Release bundle signed with production release key. See
+`docs/verification/SPRINT_24_GATE.md` and `docs/verification/SPRINT_24_DEVICE_RESULTS.md`.
 
 ---
 

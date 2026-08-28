@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import kotlinx.coroutines.runBlocking
+import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -35,6 +36,11 @@ class UtilityBackupRestoreDeviceTest {
 
     private val context: Context get() = ApplicationProvider.getApplicationContext()
     private val password = "correct horse battery".toCharArray()
+
+    @After
+    fun tearDown() {
+        DatabaseProvider.close()
+    }
 
     @Test
     fun utilityProfileOccurrencePaymentAndAttachmentSurviveABackupAndRestoreCycle() = runBlocking {
@@ -87,6 +93,7 @@ class UtilityBackupRestoreDeviceTest {
             sizeBytes = attachmentBytes.size.toLong(), fileHash = null, createdAtEpochMillis = System.currentTimeMillis(),
         )
         repository.addAttachment(attachment)
+        db.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").use { }
 
         val backupFile = repository.createEncryptedBackupFile(context, password)
         val backupBytes = backupFile.readBytes()

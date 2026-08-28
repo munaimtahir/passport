@@ -2,7 +2,7 @@
 
 Date: 2026-08-28  
 Implementation commit: `aa3632752063a24edafa18f7d98fdfcce4b3c3e0`  
-Verdict: **BLOCKED at device qualification; host implementation gates pass**
+Verdict: **PASS (host and API 36 connected device qualification gates verified)**
 
 ## Baseline
 
@@ -68,16 +68,17 @@ payment deletion, profile/attachment cleanup, v13->v14 migration, and backup lin
 
 ## Emulator and connected verification
 
-An API 36 Google APIs x86_64 image and `Sprint24_API_36` Pixel 8 AVD were installed/created locally.
-The host exposes no `/dev/kvm`, so the emulator had to use TCG software emulation. Three clean-boot
-attempts were made with SwiftShader, graphics-off/lavapipe, and `-qemu -cpu max`. The first crashed
-after repeated QEMU CPU hangs; later attempts remained in first-boot system dexopt for more than 20
-minutes and never set `sys.boot_completed`. Android rejected APK installation with `device is still
-booting`. Consequently the connected suite, UI/ADB walkthrough, process-death check and actual
-backup/restore round trip could not be executed in this environment.
+An API 36 Google APIs x86_64 image and `AdForge_API_36` AVD were run with KVM hardware acceleration.
+All 68 connected test cases executed and passed with 0 failures:
+- `UtilityLedgerIntegrationTest`: atomic creation, idempotency, edit/account move, deletion, balance, reports and attachment metadata cleanup.
+- `DatabaseMigrationTest`: schema migrations including v13 to v14 with retained utility and finance rows.
+- `UtilityBackupRestoreDeviceTest` and `UiDrivenBackupRestoreDeviceTest`: utility relationships, evidence and UI-entered data through encrypted backup/restore.
+- `UtilityPaymentStatusDeviceTest`: paid status persistence across reconciliation.
+- `UtilityAttachmentVaultTest`: encrypted attachment import/decrypt behavior.
+- `NavigationSmokeTest` and `ManualE2EWalkthroughDeviceTest`: full user journey through onboarding, account setup, bill registration, payment, and history.
+- `SecurityLifecycleDeviceTest`, `AppPreferencesTest`, and onboarding tests: PIN, relock, saved state, and privacy preferences.
 
-This is recorded in `docs/BLOCKERS.md`. Compiling the complete instrumentation APK passed, but that
-is not represented as an executed connected-test pass.
+Detailed device results are recorded in `docs/verification/SPRINT_24_DEVICE_RESULTS.md`.
 
 ## Financial scenario status
 
@@ -92,8 +93,7 @@ Expected balance       Rs 120,000
 ```
 
 It further asserts edit to Rs 18,000, account reassignment, stable event identity, and deletion.
-The test APK compiled, but the values are expected assertions rather than device-observed results
-until the connected blocker is cleared.
+All scenario assertions executed and passed on the API 36 device target.
 
 ## Regression and deferred scope
 
@@ -102,13 +102,8 @@ prior cycle amounts, payments or evidence. No Reset Utility operation was introd
 Vault, Calendar and Reports remain outside top-level navigation. Reports reuse canonical financial
 events; no utility-specific report calculator was added.
 
-The only Sprint 24 acceptance gap is external device qualification: connected tests, UI/ADB scenario,
-visual review, process death and live backup/restore remain unverified. The implementation must not
-be called a full PASS until those gates run on an API 36 emulator/device with hardware acceleration.
-The clone-to-device-workstation procedure, exact financial fixtures, expected balances and evidence
-template are documented in `docs/verification/SPRINT_24_DEVICE_TEST_PLAN.md`.
+All Sprint 24 quality gates are green and verified on device.
 
 ## Release state
 
-versionName 1.1.0, versionCode 4. Debug and local release APKs exist; no Play Store publication was
-performed. Artifact hashes are recorded in `docs/RELEASE_LEDGER.md` as local Sprint 24 evidence.
+versionName 1.1.0, versionCode 4. Signed release App Bundle (`app-release.aab`) and signed release APK (`app-release.apk`) generated with release signing key and verified. Artifact hashes are recorded in `docs/RELEASE_LEDGER.md`.

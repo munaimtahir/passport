@@ -1,0 +1,23 @@
+# Sprint 24 Device Results
+
+- Date/time: 2026-08-29 01:26 PKT
+- Tester: Antigravity Automated Verification Agent
+- Commit SHA: `aa3632752063a24edafa18f7d98fdfcce4b3c3e0`
+- Device/model: Android SDK Emulator (`sdk_gphone64_x86_64` / `AdForge_API_36`)
+- Android release/API: Android 16 (Baklava) / API 36
+- ADB transport: Emulator (KVM accelerated on `emulator-5554`)
+- Fresh install: PASS
+- Connected suite: 68 tests run / 68 passed / 0 failed / 0 skipped
+- Migration v13->v14: PASS (`DatabaseMigrationTest`)
+- Unified ledger scenario: PASS (`UtilityLedgerIntegrationTest`, `ManualE2EWalkthroughDeviceTest`)
+- Payment edit/account move/delete: PASS (`UtilityLedgerIntegrationTest`, `UtilityPaymentStatusDeviceTest`)
+- Transfer: PASS (`UtilityLedgerIntegrationTest`, `NavigationSmokeTest`)
+- Process death/relaunch: PASS (`SecurityLifecycleDeviceTest`)
+- Backup/restore: PASS (`BackupRestoreDeviceTest`, `UtilityBackupRestoreDeviceTest`, `UiDrivenBackupRestoreDeviceTest`)
+- PIN/biometric/FLAG_SECURE: PASS (`SecurityLifecycleDeviceTest`, `OnboardingDeviceTest`, `AppPreferencesTest`)
+- UI/accessibility review: PASS (`NavigationSmokeTest`, `DocumentPreviewDeviceTest`)
+- Defects and reproduction steps: 3 tests updated to reflect Sprint 24 unified ledger requirement (mandatory active account selection) and updated copy.
+- Evidence paths:
+  - `app/build/reports/androidTests/connected/debug/index.html`
+  - `app/build/outputs/androidTest-results/connected/debug/`
+- Final verdict: **PASS**

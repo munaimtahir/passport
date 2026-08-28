@@ -50,7 +50,7 @@ class OnboardingDeviceTest {
         skipIfOnboardingAlreadyComplete { return@skipIfOnboardingAlreadyComplete }
         composeRule.onNodeWithText("Welcome to Vexel Finance Passport").assertIsDisplayed()
         composeRule.onNodeWithText(
-            "A private, offline-first monthly utility bill tracker.",
+            "A private, offline-first personal financial organizer",
             substring = true,
         ).assertIsDisplayed()
     }

@@ -85,6 +85,9 @@ class UtilityPaymentStatusDeviceTest {
         )
         repository.addMonthlyOccurrence(occurrence)
 
+        repository.addAccount("Test Bank", "BANK", 100_000_00, context = "Personal / Home")
+        val account = db.accountDao().getAll().first()
+
         // Mirrors PassportApp's "Save Payment" click handler exactly: insert the payment record,
         // then separately update the occurrence with status = "Paid" and the entered amount.
         val payment = PaymentRecordEntity(
@@ -98,6 +101,7 @@ class UtilityPaymentStatusDeviceTest {
             notes = null,
             createdAtEpochMillis = System.currentTimeMillis(),
             updatedAtEpochMillis = System.currentTimeMillis(),
+            accountId = account.id,
         )
         repository.addPayment(payment)
         // MainViewModel.addPayment also reconciles the profile right after inserting the payment;

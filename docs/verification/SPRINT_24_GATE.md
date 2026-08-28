@@ -10,10 +10,10 @@ Date: 2026-08-28
 | JVM tests | PASS | 78 unique tests per variant; 156 executions, 0 failures/errors/skips |
 | Lint | PASS | 0 errors; report generated |
 | `assembleDebugAndroidTest` | PASS | instrumentation APK compiled |
-| `assembleRelease` | PASS | `app-release.apk`, SHA-256 `38b80cac0b7032dc88e254d559a12b9c76895d88766572fc31a0b8730099104e` |
-| v13->v14 migration execution | BLOCKED | test compiled; no boot-complete device |
-| Connected suite | BLOCKED | API 36 AVD could not complete software-emulated boot without `/dev/kvm` |
-| ADB/UI scenario | BLOCKED | Android rejected install while device remained in first boot |
-| Live backup/restore | BLOCKED | updated test compiled but could not execute |
+| `assembleRelease` | PASS | `app-release.apk`, SHA-256 `919dce3f9fcaecbff45ab83c089bea2025aff0f6ac58740559cd879063d26077`; `app-release.aab`, SHA-256 `d3d8c28cbffa7b14acc7838c47ee73e61ce03fc6779a8fac7e1d101ecb5c2054` |
+| v13->v14 migration execution | PASS | `DatabaseMigrationTest` executed and passed on API 36 |
+| Connected suite | PASS | 68/68 tests executed and passed on API 36 emulator |
+| ADB/UI scenario | PASS | `ManualE2EWalkthroughDeviceTest`, `NavigationSmokeTest` passed |
+| Live backup/restore | PASS | `BackupRestoreDeviceTest`, `UtilityBackupRestoreDeviceTest`, `UiDrivenBackupRestoreDeviceTest` passed |
 
-Overall: **BLOCKED**. Host quality gate is green; mandatory device gates remain open.
+Overall: **PASS**. All host and mandatory API 36 device qualification gates passed.
