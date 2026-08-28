@@ -192,4 +192,27 @@ class DatabaseMigrationTest {
             }
         }
     }
+
+    @Test
+    fun migrateV13ToV14PreservesUtilityAndFinanceRowsAndAddsLedgerLinks() {
+        helper.createDatabase("migration-v13", 13).apply {
+            execSQL("INSERT INTO accounts (id,name,institution,accountType,maskedIdentifier,encryptedSensitiveIdentifier,currency,openingBalanceMinor,openingBalanceDateEpochDay,status,notes,createdAtEpochMillis,updatedAtEpochMillis) VALUES ('account','HBL',NULL,'BANK',NULL,NULL,'PKR',10000000,0,'ACTIVE',NULL,1,1)")
+            execSQL("INSERT INTO utility_bill_profiles VALUES ('profile','Home Electricity','Telephone','ref',15,27,'2026-08','ACTIVE',NULL,NULL,'Home',NULL,NULL,'DISABLED',1,1)")
+            execSQL("INSERT INTO monthly_bill_occurrences VALUES ('occurrence','profile',2026,8,1,2,NULL,NULL,2000000,'Paid',NULL,'Automatic',1,1)")
+            execSQL("INSERT INTO payment_records VALUES ('payment','occurrence',2000000,3,'Cash',NULL,NULL,NULL,1,1)")
+            close()
+        }
+
+        helper.runMigrationsAndValidate("migration-v13", 14, true, DatabaseProvider.MIGRATION_13_14).use { database ->
+            database.query("SELECT context FROM accounts WHERE id='account'").use { cursor ->
+                check(cursor.moveToFirst() && cursor.isNull(0))
+            }
+            database.query("SELECT accountId, financialEventId FROM payment_records WHERE id='payment'").use { cursor ->
+                check(cursor.moveToFirst() && cursor.isNull(0) && cursor.isNull(1))
+            }
+            database.query("SELECT category FROM utility_bill_profiles WHERE id='profile'").use { cursor ->
+                check(cursor.moveToFirst() && cursor.getString(0) == "Telephone") { "Legacy utility category must remain readable" }
+            }
+        }
+    }
 }

@@ -23,9 +23,8 @@ import org.junit.runner.RunWith
 import pk.vexel.financepassport.MainActivity
 
 /**
- * Confirms the only reachable primary destinations are Home / Bills / History — the hidden
- * finance/tax surfaces (Money, Wealth, Tax & Records, Vault, Reports) must never appear in the
- * bottom navigation now that the app is scoped to the utility bill tracker.
+ * Confirms Sprint 24's unified shell exposes Home / Bills / Money / History while later finance
+ * workspaces remain outside primary navigation.
  */
 @RunWith(AndroidJUnit4::class)
 class NavigationSmokeTest {
@@ -42,16 +41,19 @@ class NavigationSmokeTest {
     @Test
     fun launchShowsTheUtilityBillTrackerShell() {
         unlockIfNeeded()
-        composeRule.onNodeWithText("Utility Bill Tracker").assertIsDisplayed()
+        composeRule.onNodeWithText("Vexel Finance Passport").assertIsDisplayed()
         composeRule.onNodeWithText("Dashboard").assertIsDisplayed()
     }
 
     @Test
-    fun onlyHomeBillsAndHistoryAreReachableAndHiddenFinanceSurfacesAreAbsent() {
+    fun homeBillsMoneyAndHistoryAreReachableAndDeferredSurfacesAreAbsent() {
         unlockIfNeeded()
 
         composeRule.onNodeWithText("Bills", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Utility Connections").assertIsDisplayed()
+
+        composeRule.onNodeWithText("Money", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("money-list").assertIsDisplayed()
 
         composeRule.onNodeWithText("History", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Global Bill & Payment History").assertIsDisplayed()
@@ -59,7 +61,7 @@ class NavigationSmokeTest {
         composeRule.onNodeWithText("Home", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Dashboard").assertIsDisplayed()
 
-        listOf("Money", "Wealth", "Tax & Records", "Tax", "Vault", "Net Worth", "Accounts", "Investments", "Loans", "Receivables", "Goals").forEach { hidden ->
+        listOf("Wealth", "Tax & Records", "Tax", "Vault", "Net Worth", "Investments", "Loans", "Receivables", "Goals").forEach { hidden ->
             assertTrue(
                 "'$hidden' must not be reachable from the main navigation",
                 composeRule.onAllNodesWithText(hidden, useUnmergedTree = true).fetchSemanticsNodes().isEmpty(),

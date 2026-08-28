@@ -11,6 +11,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import pk.vexel.financepassport.core.database.BillAttachmentEntity
+import pk.vexel.financepassport.core.database.AccountEntity
 import pk.vexel.financepassport.core.database.DatabaseProvider
 import pk.vexel.financepassport.core.database.FinanceRepository
 import pk.vexel.financepassport.core.database.MonthlyBillOccurrenceEntity
@@ -47,6 +48,8 @@ class UtilityBackupRestoreDeviceTest {
         var repository = FinanceRepository(db)
 
         val today = LocalDate.now()
+        val account = AccountEntity("backup-account", "HBL Personal", "HBL", "BANK", null, null, "PKR", 100_000_00, today.toEpochDay(), "ACTIVE", null, 1, 1, "Personal / Home")
+        db.accountDao().upsert(account)
         val profile = UtilityBillProfileEntity(
             id = UUID.randomUUID().toString(), name = "Backup Test Electric", category = "Electricity",
             referenceNumber = "REF-BK-1", issueDayAnchor = 1, dueDayAnchor = 5,
@@ -71,7 +74,7 @@ class UtilityBackupRestoreDeviceTest {
             id = UUID.randomUUID().toString(), occurrenceId = occurrence.id, amountPaidMinor = 250000,
             paymentDateEpochDay = today.toEpochDay(), paymentMode = "Cash", bankName = null,
             transactionReference = null, notes = null, createdAtEpochMillis = System.currentTimeMillis(),
-            updatedAtEpochMillis = System.currentTimeMillis(),
+            updatedAtEpochMillis = System.currentTimeMillis(), accountId = account.id,
         )
         repository.addPayment(payment)
 
@@ -119,6 +122,11 @@ class UtilityBackupRestoreDeviceTest {
         val restoredPayment = db.paymentRecordDao().getForOccurrence(occurrence.id)
         assertNotNull(restoredPayment)
         assertEquals(250000L, restoredPayment?.amountPaidMinor)
+        assertEquals(account.id, restoredPayment?.accountId)
+        val restoredEvent = restoredPayment?.financialEventId?.let { db.financialEventDao().getById(it) }
+        assertNotNull(restoredEvent)
+        assertEquals("EXPENSE", restoredEvent?.eventType)
+        assertEquals(account.id, restoredEvent?.accountId)
 
         val restoredAttachments = db.billAttachmentDao().getForLinkedEntity(occurrence.id)
         assertEquals(1, restoredAttachments.size)

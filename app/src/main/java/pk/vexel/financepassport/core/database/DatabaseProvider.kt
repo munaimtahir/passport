@@ -128,10 +128,22 @@ object DatabaseProvider {
         }
     }
 
+    val MIGRATION_13_14: Migration = object : Migration(13, 14) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE accounts ADD COLUMN context TEXT")
+            db.execSQL("ALTER TABLE payment_records ADD COLUMN accountId TEXT")
+            db.execSQL("ALTER TABLE payment_records ADD COLUMN financialEventId TEXT")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_payment_records_accountId ON payment_records(accountId)")
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_payment_records_financialEventId ON payment_records(financialEventId)")
+            db.execSQL("ALTER TABLE bill_attachments ADD COLUMN linkedEntityType TEXT NOT NULL DEFAULT 'UNKNOWN'")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_bill_attachments_linkedEntityType_linkedId ON bill_attachments(linkedEntityType, linkedId)")
+        }
+    }
+
     /** The single migration registry used by production and restore validation. */
     val ALL_MIGRATIONS = arrayOf(
         MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
         MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10,
-        MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13,
+        MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14,
     )
 }

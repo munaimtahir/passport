@@ -13,6 +13,8 @@ interface AccountDao {
     suspend fun getAll(): List<AccountEntity>
     @Query("SELECT * FROM accounts WHERE status = 'ACTIVE' ORDER BY name")
     fun observeActive(): Flow<List<AccountEntity>>
+    @Query("SELECT * FROM accounts ORDER BY status, name")
+    fun observeAll(): Flow<List<AccountEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(account: AccountEntity)
@@ -23,8 +25,11 @@ interface AccountDao {
     @Query("UPDATE accounts SET status = 'ARCHIVED', updatedAtEpochMillis = :updatedAt WHERE id = :id")
     suspend fun archive(id: String, updatedAt: Long)
 
-    @Query("UPDATE accounts SET name = :name, openingBalanceMinor = :openingBalanceMinor, institution = :institution, notes = :notes, updatedAtEpochMillis = :updatedAt WHERE id = :id")
-    suspend fun updateDetails(id: String, name: String, openingBalanceMinor: Long, institution: String?, notes: String?, updatedAt: Long)
+    @Query("UPDATE accounts SET status = 'ACTIVE', updatedAtEpochMillis = :updatedAt WHERE id = :id")
+    suspend fun reactivate(id: String, updatedAt: Long)
+
+    @Query("UPDATE accounts SET name = :name, accountType = :accountType, context = :context, openingBalanceMinor = :openingBalanceMinor, institution = :institution, notes = :notes, updatedAtEpochMillis = :updatedAt WHERE id = :id")
+    suspend fun updateDetails(id: String, name: String, accountType: String, context: String?, openingBalanceMinor: Long, institution: String?, notes: String?, updatedAt: Long)
 }
 
 @Dao
@@ -244,6 +249,9 @@ interface FinancialEventDao {
     @Query("SELECT * FROM financial_events WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): FinancialEventEntity?
 
+    @Query("DELETE FROM financial_events WHERE id = :id")
+    suspend fun deleteById(id: String)
+
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insertAll(events: List<FinancialEventEntity>)
 
@@ -462,14 +470,20 @@ interface PaymentRecordDao {
     @Query("SELECT * FROM payment_records WHERE occurrenceId = :occurrenceId LIMIT 1")
     suspend fun getForOccurrence(occurrenceId: String): PaymentRecordEntity?
 
+    @Query("SELECT * FROM payment_records WHERE financialEventId = :financialEventId LIMIT 1")
+    suspend fun getForFinancialEvent(financialEventId: String): PaymentRecordEntity?
+
     @Query("SELECT * FROM payment_records WHERE occurrenceId = :occurrenceId LIMIT 1")
     fun observeForOccurrence(occurrenceId: String): Flow<PaymentRecordEntity?>
 
     @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun insert(payment: PaymentRecordEntity)
 
-    @Query("UPDATE payment_records SET amountPaidMinor = :amountPaid, paymentDateEpochDay = :paymentDate, paymentMode = :mode, bankName = :bank, transactionReference = :reference, notes = :notes, updatedAtEpochMillis = :updatedAt WHERE id = :id")
-    suspend fun updateDetails(id: String, amountPaid: Long, paymentDate: Long, mode: String, bank: String?, reference: String?, notes: String?, updatedAt: Long)
+    @Update
+    suspend fun update(payment: PaymentRecordEntity)
+
+    @Query("UPDATE payment_records SET amountPaidMinor = :amountPaid, paymentDateEpochDay = :paymentDate, paymentMode = :mode, accountId = :accountId, bankName = :bank, transactionReference = :reference, notes = :notes, updatedAtEpochMillis = :updatedAt WHERE id = :id")
+    suspend fun updateDetails(id: String, amountPaid: Long, paymentDate: Long, mode: String, accountId: String, bank: String?, reference: String?, notes: String?, updatedAt: Long)
 
     @Query("DELETE FROM payment_records WHERE id = :id")
     suspend fun delete(id: String)
@@ -486,6 +500,9 @@ interface BillAttachmentDao {
     @Query("SELECT * FROM bill_attachments WHERE linkedId = :linkedId")
     suspend fun getForLinkedEntity(linkedId: String): List<BillAttachmentEntity>
 
+    @Query("SELECT * FROM bill_attachments WHERE linkedId IN (:linkedIds)")
+    suspend fun getForLinkedEntities(linkedIds: List<String>): List<BillAttachmentEntity>
+
     @Query("SELECT * FROM bill_attachments WHERE linkedId = :linkedId")
     fun observeForLinkedEntity(linkedId: String): Flow<List<BillAttachmentEntity>>
 
@@ -494,6 +511,9 @@ interface BillAttachmentDao {
 
     @Query("DELETE FROM bill_attachments WHERE id = :id")
     suspend fun delete(id: String)
+
+    @Query("DELETE FROM bill_attachments WHERE linkedId IN (:linkedIds)")
+    suspend fun deleteForLinkedEntities(linkedIds: List<String>)
     
     @Query("SELECT * FROM bill_attachments")
     suspend fun getAll(): List<BillAttachmentEntity>

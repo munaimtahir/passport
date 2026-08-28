@@ -29,6 +29,8 @@ data class AccountEntity(
     val notes: String?,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
+    /** Financial context is organizational metadata, deliberately separate from accountType. */
+    val context: String? = null,
 )
 
 @Entity(tableName = "financial_events", indices = [Index("dateEpochDay"), Index("accountId"), Index("incomeSourceId")])
@@ -425,7 +427,9 @@ data class MonthlyBillOccurrenceEntity(
         )
     ],
     indices = [
-        Index(value = ["occurrenceId"], unique = true)
+        Index(value = ["occurrenceId"], unique = true),
+        Index("accountId"),
+        Index(value = ["financialEventId"], unique = true),
     ]
 )
 data class PaymentRecordEntity(
@@ -438,13 +442,18 @@ data class PaymentRecordEntity(
     val transactionReference: String?,
     val notes: String?,
     val createdAtEpochMillis: Long,
-    val updatedAtEpochMillis: Long
+    val updatedAtEpochMillis: Long,
+    /** Active account used by the canonical ledger expense; null only for pre-v14 legacy payments. */
+    val accountId: String? = null,
+    /** Stable one-to-one link to the utility-generated financial event. */
+    val financialEventId: String? = null,
 )
 
 @Entity(
     tableName = "bill_attachments",
     indices = [
-        Index("linkedId")
+        Index("linkedId"),
+        Index(value = ["linkedEntityType", "linkedId"]),
     ]
 )
 data class BillAttachmentEntity(
@@ -456,6 +465,7 @@ data class BillAttachmentEntity(
     val mimeType: String,
     val sizeBytes: Long,
     val fileHash: String?,
-    val createdAtEpochMillis: Long
+    val createdAtEpochMillis: Long,
+    /** PROFILE, OCCURRENCE or PAYMENT; UNKNOWN preserves v13 metadata safely. */
+    val linkedEntityType: String = "UNKNOWN",
 )
-

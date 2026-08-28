@@ -8,6 +8,7 @@ import android.os.ParcelFileDescriptor
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -109,8 +110,11 @@ import pk.vexel.financepassport.core.database.BillAttachmentEntity
 import pk.vexel.financepassport.core.database.UtilityRecurrenceEngine
 import pk.vexel.financepassport.core.model.FinancialEventType
 import pk.vexel.financepassport.core.model.PkrMoneyInput
+import pk.vexel.financepassport.core.model.UtilityCategory
 import pk.vexel.financepassport.core.files.DocumentVault
 import pk.vexel.financepassport.core.security.LiveRestoreService
+import pk.vexel.financepassport.core.security.PinStore
+import pk.vexel.financepassport.core.security.PinVerifier
 import pk.vexel.financepassport.ui.theme.PassportTheme
 import java.util.UUID
 import java.time.YearMonth
@@ -120,6 +124,7 @@ private data class Destination(val label: String, val icon: ImageVector)
 private val destinations = listOf(
     Destination("Home", Icons.Default.Home),
     Destination("Bills", Icons.Default.Description),
+    Destination("Money", Icons.Default.AccountBalanceWallet),
     Destination("History", Icons.Default.Folder),
 )
 
@@ -137,7 +142,7 @@ fun PassportApp() {
     CompositionLocalProvider(LocalPrivacyMode provides vm.privacyModeEnabled) {
         Scaffold(
             topBar = {
-                TopAppBar(title = { Text("Utility Bill Tracker") }, actions = {
+                TopAppBar(title = { Text("Vexel Finance Passport") }, actions = {
                     IconButton(onClick = vm::togglePrivacyMode) {
                         Icon(
                             if (vm.privacyModeEnabled) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
@@ -159,7 +164,8 @@ fun PassportApp() {
             when (selected) {
                 0 -> HomeScreen(vm, application, padding) { selected = it }
                 1 -> BillsScreen(vm, application, padding)
-                2 -> HistoryScreen(vm, application, padding)
+                2 -> MoneyScreen(vm, application, padding)
+                3 -> HistoryScreen(vm, application, padding)
                 else -> EmptyModuleScreen(destinations[selected].label, padding)
             }
         }
@@ -180,6 +186,8 @@ private fun MoreDialog(vm: MainViewModel, application: PassportApplication, onDi
     var restorePayload by remember { mutableStateOf<ByteArray?>(null) }
     var pendingBackup by remember { mutableStateOf<java.io.File?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
+    var showPinManagement by rememberSaveable { mutableStateOf(false) }
+    val pinStore = remember(application) { PinStore(application) }
     var requestedReport by rememberSaveable { mutableStateOf("NET_WORTH") }
     var currentYearOnly by rememberSaveable { mutableStateOf(false) }
     var previewReport by remember { mutableStateOf<pk.vexel.financepassport.core.reports.FinancialReport?>(null) }
@@ -213,6 +221,13 @@ private fun MoreDialog(vm: MainViewModel, application: PassportApplication, onDi
                 status?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
 
                 Button(
+                    onClick = { showPinManagement = true },
+                    modifier = Modifier.fillMaxWidth().testTag("pin-management-button")
+                ) {
+                    Text(if (pinStore.hasPin()) "Change or Remove App PIN" else "Set App PIN")
+                }
+
+                Button(
                     onClick = { backupPassword = true },
                     modifier = Modifier.fillMaxWidth().testTag("backup-button")
                 ) {
@@ -242,6 +257,7 @@ private fun MoreDialog(vm: MainViewModel, application: PassportApplication, onDi
         }
     )
     if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false; deleteConfirmation = "" }, title = { Text("Delete everything?") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("This permanently removes local records, encrypted vault files, preferences, and scheduled work. It cannot be undone."); OutlinedTextField(deleteConfirmation, { deleteConfirmation = it }, label = { Text("Type DELETE to confirm") }, singleLine = true, modifier = Modifier.testTag("delete-confirmation")) } }, confirmButton = { Button(onClick = { vm.deleteAllData(application) { activity?.recreate() }; confirmDelete = false; deleteConfirmation = ""; onDismiss() }, enabled = deleteConfirmation == "DELETE") { Text("Delete all") } }, dismissButton = { TextButton(onClick = { confirmDelete = false; deleteConfirmation = "" }) { Text("Cancel") } })
+    if (showPinManagement) PinManagementDialog(pinStore, onDismiss = { showPinManagement = false }) { status = it; showPinManagement = false }
     if (backupPassword) BackupPasswordDialog("Create encrypted backup", onDismiss = { backupPassword = false }) { password ->
         backupPassword = false
         vm.createBackup(application, password.toCharArray()) { result -> result.onSuccess { pendingBackup = it; backupSaver.launch("vexel-finance-passport.backup") }.onFailure { status = "Backup failed: ${it.message}" } }
@@ -266,6 +282,45 @@ private fun MoreDialog(vm: MainViewModel, application: PassportApplication, onDi
 }
 
 @Composable
+private fun PinManagementDialog(store: PinStore, onDismiss: () -> Unit, onComplete: (String) -> Unit) {
+    val hadPin = remember { store.hasPin() }
+    var currentPin by remember { mutableStateOf("") }
+    var newPin by remember { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf("") }
+    var remove by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (hadPin) "Manage App PIN" else "Set App PIN") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (hadPin) OutlinedTextField(currentPin, { currentPin = it.filter(Char::isDigit).take(12) }, label = { Text("Current PIN") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
+                if (hadPin) FilterChip(remove, { remove = !remove }, { Text("Remove PIN") })
+                if (!remove) {
+                    OutlinedTextField(newPin, { newPin = it.filter(Char::isDigit).take(12) }, label = { Text("New PIN") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
+                    OutlinedTextField(confirmation, { confirmation = it.filter(Char::isDigit).take(12) }, label = { Text("Confirm new PIN") }, visualTransformation = PasswordVisualTransformation(), singleLine = true)
+                }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            Button(onClick = {
+                runCatching {
+                    if (hadPin) require(store.verify(currentPin.toCharArray())) { "Current PIN is incorrect." }
+                    if (remove) store.clear() else {
+                        require(newPin.length >= 4) { "Use at least 4 digits." }
+                        require(newPin == confirmation) { "PINs do not match." }
+                        store.save(PinVerifier.create(newPin.toCharArray()))
+                    }
+                }.onSuccess { onComplete(if (remove) "App PIN removed" else if (hadPin) "App PIN changed" else "App PIN set") }
+                    .onFailure { error = it.message }
+            }, enabled = (!hadPin || currentPin.length >= 4) && (remove || (newPin.length >= 4 && confirmation.length >= 4))) { Text(if (remove) "Remove PIN" else "Save PIN") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
 private fun BackupPasswordDialog(title: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     // Deliberately plain `remember`, not `rememberSaveable`: a backup/restore password must not
     // be written into the saved-instance-state Bundle, which Android can persist to disk across
@@ -278,6 +333,10 @@ private fun BackupPasswordDialog(title: String, onDismiss: () -> Unit, onConfirm
 private fun HomeScreen(vm: MainViewModel, application: PassportApplication, padding: PaddingValues, onNavigate: (Int) -> Unit) {
     val profiles by vm.utilityProfiles.collectAsState()
     val occurrences by vm.monthlyOccurrences.collectAsState()
+    val financialPosition by vm.financialPosition.collectAsState()
+    val activeAccounts by vm.activeAccounts.collectAsState()
+    var quickEvent by rememberSaveable { mutableStateOf<Boolean?>(null) }
+    var quickBill by rememberSaveable { mutableStateOf(false) }
     val today = remember { java.time.LocalDate.now() }
 
     val unpaidObligations = remember(occurrences, today) {
@@ -333,6 +392,26 @@ private fun HomeScreen(vm: MainViewModel, application: PassportApplication, padd
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         Text("Dashboard", style = MaterialTheme.typography.headlineMedium)
+
+        financialPosition?.let { position ->
+            Text("Financial overview", style = MaterialTheme.typography.titleMedium)
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), Arrangement.spacedBy(8.dp)) {
+                    Text("Available balance", style = MaterialTheme.typography.labelMedium)
+                    Text(MaskedPkr(position.liquidFundsMinor), style = MaterialTheme.typography.headlineSmall)
+                    Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
+                        Text("Income this month ${MaskedPkr(position.monthlyIncomeMinor)}")
+                        Text("Expenses ${MaskedPkr(position.monthlyExpenseMinor)}")
+                    }
+                }
+            }
+        }
+        Text("Quick Add", style = MaterialTheme.typography.titleMedium)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = { quickEvent = true }, enabled = activeAccounts.isNotEmpty(), modifier = Modifier.testTag("home-add-income")) { Text("Income") }
+            OutlinedButton(onClick = { quickEvent = false }, enabled = activeAccounts.isNotEmpty(), modifier = Modifier.testTag("home-add-expense")) { Text("Expense") }
+            OutlinedButton(onClick = { quickBill = true }, modifier = Modifier.testTag("home-add-bill")) { Text("Bill") }
+        }
 
         if (profiles.isEmpty()) {
             Card(
@@ -427,6 +506,8 @@ private fun HomeScreen(vm: MainViewModel, application: PassportApplication, padd
     selectedOccurrenceForDetails?.let { occ ->
         MonthlyOccurrenceDetailsDialog(occ, vm, application, onDismiss = { selectedOccurrenceForDetails = null })
     }
+    quickEvent?.let { income -> AddEventDialog(vm, activeAccounts, income) { quickEvent = null } }
+    if (quickBill) AddBillDialog(vm, application) { quickBill = false }
 }
 
 @Composable
@@ -445,6 +526,7 @@ private fun CalendarItemDialog(vm: MainViewModel, application: PassportApplicati
 @Composable
 private fun MoneyScreen(vm: MainViewModel, application: PassportApplication, padding: PaddingValues) {
     val accounts by vm.accounts.collectAsState()
+    val activeAccounts = accounts.filter { it.status == "ACTIVE" }
     val recentEvents by vm.recentEvents.collectAsState()
     val recurringItems by vm.recurringItems.collectAsState()
     val incomeSources by vm.incomeSources.collectAsState()
@@ -454,7 +536,7 @@ private fun MoneyScreen(vm: MainViewModel, application: PassportApplication, pad
             .mapValues { (_, events) -> events.sumOf { it.amountMinor } }
             .entries.sortedByDescending { it.value }
     }
-    var showEvent by rememberSaveable { mutableStateOf(false) }
+    var showEvent by rememberSaveable { mutableStateOf<Boolean?>(null) }
     var showTransfer by rememberSaveable { mutableStateOf(false) }
     var showRecurring by rememberSaveable { mutableStateOf(false) }
     var showAddAccount by rememberSaveable { mutableStateOf(false) }
@@ -473,8 +555,10 @@ private fun MoneyScreen(vm: MainViewModel, application: PassportApplication, pad
         item { Text("Money", style = MaterialTheme.typography.headlineMedium) }
         item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Accounts", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showAddAccount = true }, modifier = Modifier.testTag("add-account")) { Text("Add account") } } }
         if (accounts.isEmpty()) item { Text("No accounts yet. Use + to add cash or a bank account.") }
-        items(accounts, key = { it.id }) { account -> AccountCard(account, vm, onEdit = { editAccount = account }, onArchive = { vm.archiveAccount(account.id) }) }
-        item { Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) { Button(onClick = { showEvent = true }, enabled = accounts.isNotEmpty(), modifier = Modifier.weight(1f)) { Text("Income / expense") }; Button(onClick = { showTransfer = true }, enabled = accounts.size >= 2, modifier = Modifier.weight(1f)) { Text("Transfer") } } }
+        items(accounts, key = { it.id }) { account -> AccountCard(account, vm, onEdit = { editAccount = account }, onArchive = { vm.archiveAccount(account.id) }, onReactivate = { vm.reactivateAccount(account.id) }) }
+        item { Text("Quick actions", style = MaterialTheme.typography.titleLarge) }
+        item { Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) { Button(onClick = { showEvent = true }, enabled = activeAccounts.isNotEmpty(), modifier = Modifier.weight(1f).testTag("add-income")) { Text("Add Income") }; Button(onClick = { showEvent = false }, enabled = activeAccounts.isNotEmpty(), modifier = Modifier.weight(1f).testTag("add-expense")) { Text("Add Expense") } } }
+        item { Button(onClick = { showTransfer = true }, enabled = activeAccounts.size >= 2, modifier = Modifier.fillMaxWidth().testTag("add-transfer")) { Text("Transfer") } }
         item { Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) { Text("Bills & Recurring", style = MaterialTheme.typography.titleLarge); OutlinedButton(onClick = { showRecurring = true }, enabled = accounts.isNotEmpty(), modifier = Modifier.testTag("add-recurring")) { Text("Add") } } }
         if (recurringItems.isEmpty()) item { Text("No bills or recurring items yet. Add one to receive a reminder without silently creating a confirmed event.") }
         items(recurringItems, key = { it.id }) { recurring -> Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text(recurring.title, style = MaterialTheme.typography.titleMedium); Text(listOfNotNull(recurring.eventType, recurring.category).joinToString(" · ") + " · ${MaskedPkr(recurring.amountMinor)} · ${recurring.frequency}"); Text("Next due: ${java.time.LocalDate.ofEpochDay(recurring.nextDueDateEpochDay)}"); Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = { vm.confirmRecurringItemNow(application, recurring.id) }, modifier = Modifier.testTag("mark-paid-${recurring.id}")) { Text("Mark paid") }; TextButton(onClick = { vm.pauseRecurringItem(application, recurring.id) }) { Text("Pause") } } } } }
@@ -507,11 +591,11 @@ private fun MoneyScreen(vm: MainViewModel, application: PassportApplication, pad
             }
         }
         if (filteredEvents.isEmpty()) item { Text("No activity matches these filters.") }
-        items(filteredEvents, key = { it.id }) { event -> Card(Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp), Arrangement.SpaceBetween) { Column { Text(event.description); Text(listOfNotNull(event.eventType, event.category).joinToString(" · "), style = MaterialTheme.typography.labelSmall) }; Text(MaskedPkr(event.amountMinor)) } } }
+        items(filteredEvents, key = { it.id }) { event -> Card(Modifier.fillMaxWidth()) { Row(Modifier.padding(16.dp), Arrangement.SpaceBetween) { Column(Modifier.weight(1f)) { Text(event.description); Text(listOfNotNull(event.eventType, event.category, accounts.firstOrNull { it.id == event.accountId }?.name, java.time.LocalDate.ofEpochDay(event.dateEpochDay).toString()).joinToString(" · "), style = MaterialTheme.typography.labelSmall); if (event.category == "Utilities") Text("From utility bill", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary) }; Text(MaskedPkr(event.amountMinor)) } } }
     }
-    if (showEvent) AddEventDialog(vm, accounts) { showEvent = false }
-    if (showTransfer) TransferDialog(vm, accounts) { showTransfer = false }
-    if (showRecurring) RecurringItemDialog(vm, application, accounts) { showRecurring = false }
+    showEvent?.let { income -> AddEventDialog(vm, activeAccounts, income) { showEvent = null } }
+    if (showTransfer) TransferDialog(vm, activeAccounts) { showTransfer = false }
+    if (showRecurring) RecurringItemDialog(vm, application, activeAccounts) { showRecurring = false }
     if (showAddAccount) AddAccountDialog(vm) { showAddAccount = false }
     editAccount?.let { account -> EditAccountDialog(account, vm, onDismiss = { editAccount = null }) }
 }
@@ -934,25 +1018,27 @@ internal fun renderAttachmentPreview(context: android.content.Context, vm: MainV
     } }, confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } })
 }
 
-@Composable private fun AccountCard(account: AccountEntity, vm: MainViewModel, onEdit: () -> Unit, onArchive: () -> Unit) {
+@Composable private fun AccountCard(account: AccountEntity, vm: MainViewModel, onEdit: () -> Unit, onArchive: () -> Unit, onReactivate: () -> Unit) {
     val movement by vm.accountMovement(account.id).collectAsState(0L)
-    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text(account.name, style = MaterialTheme.typography.titleMedium); Text(listOfNotNull(account.accountType, account.institution).joinToString(" · ")); Text("Current balance ${MaskedPkr(account.openingBalanceMinor + movement)}", style = MaterialTheme.typography.titleLarge); Text("Opening balance ${MaskedPkr(account.openingBalanceMinor)}"); account.notes?.let { Text(it, style = MaterialTheme.typography.bodySmall) }; Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = onEdit) { Text("Edit") }; TextButton(onClick = onArchive) { Text("Archive") } } } }
+    Card(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp), Arrangement.spacedBy(4.dp)) { Text(account.name, style = MaterialTheme.typography.titleMedium); Text(listOfNotNull(account.accountType.lowercase().replaceFirstChar(Char::uppercase), account.context, account.institution, account.status.lowercase().replaceFirstChar(Char::uppercase)).joinToString(" · ")); Text("Current balance ${MaskedPkr(account.openingBalanceMinor + movement)}", style = MaterialTheme.typography.titleLarge); Text("Opening balance ${MaskedPkr(account.openingBalanceMinor)}"); account.notes?.let { Text(it, style = MaterialTheme.typography.bodySmall) }; Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { TextButton(onClick = onEdit) { Text("Edit") }; if (account.status == "ACTIVE") TextButton(onClick = onArchive) { Text("Archive") } else TextButton(onClick = onReactivate) { Text("Reactivate") } } } }
 }
 
 @Composable private fun AddAccountDialog(vm: MainViewModel, onDismiss: () -> Unit) {
     var name by rememberSaveable { mutableStateOf("") }; var amount by rememberSaveable { mutableStateOf("") }
     var institution by rememberSaveable { mutableStateOf("") }; var notes by rememberSaveable { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add account") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedTextField(name, { name = it }, label = { Text("Account name") }, singleLine = true, modifier = Modifier.testTag("account-name")); OutlinedTextField(institution, { institution = it }, label = { Text("Institution (optional)") }, singleLine = true, modifier = Modifier.testTag("account-institution")); AmountField(amount, { amount = it }, "Opening balance (PKR)", modifier = Modifier.testTag("account-amount")); OutlinedTextField(notes, { notes = it }, label = { Text("Notes (optional)") }, singleLine = true, modifier = Modifier.testTag("account-notes")) } }, confirmButton = { Button(onClick = { vm.addAccount(name, "OTHER", PkrMoneyInput.toMinorUnits(amount), institution.takeIf { it.isNotBlank() }, notes.takeIf { it.isNotBlank() }); onDismiss() }, enabled = name.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(amount) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    var type by rememberSaveable { mutableStateOf("BANK") }; var accountContext by rememberSaveable { mutableStateOf("Personal / Home") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Add account") }, text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedTextField(name, { name = it }, label = { Text("Account name") }, singleLine = true, modifier = Modifier.testTag("account-name")); Text("Type"); Row(Modifier.horizontalScroll(rememberScrollState()), Arrangement.spacedBy(4.dp)) { listOf("CASH", "BANK", "WALLET", "OTHER").forEach { option -> FilterChip(type == option, { type = option }, { Text(option.lowercase().replaceFirstChar(Char::uppercase)) }) } }; Text("Context"); Row(Modifier.horizontalScroll(rememberScrollState()), Arrangement.spacedBy(4.dp)) { listOf("Personal / Home", "Clinic / Professional", "Other Business").forEach { option -> FilterChip(accountContext == option, { accountContext = option }, { Text(option) }) } }; OutlinedTextField(institution, { institution = it }, label = { Text("Institution (optional)") }, singleLine = true, modifier = Modifier.testTag("account-institution")); AmountField(amount, { amount = it }, "Opening balance (PKR)", modifier = Modifier.testTag("account-amount")); OutlinedTextField(notes, { notes = it }, label = { Text("Notes (optional)") }, singleLine = true, modifier = Modifier.testTag("account-notes")) } }, confirmButton = { Button(onClick = { vm.addAccount(name, type, PkrMoneyInput.toMinorUnits(amount), institution.takeIf { it.isNotBlank() }, notes.takeIf { it.isNotBlank() }, accountContext); onDismiss() }, enabled = name.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(amount) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
 @Composable private fun EditAccountDialog(account: AccountEntity, vm: MainViewModel, onDismiss: () -> Unit) {
     var name by rememberSaveable { mutableStateOf(account.name) }; var amount by rememberSaveable { mutableStateOf((account.openingBalanceMinor / 100).toString()) }
     var institution by rememberSaveable { mutableStateOf(account.institution.orEmpty()) }; var notes by rememberSaveable { mutableStateOf(account.notes.orEmpty()) }
-    AlertDialog(onDismissRequest = onDismiss, title = { Text("Edit account") }, text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedTextField(name, { name = it }, label = { Text("Account name") }, singleLine = true); OutlinedTextField(institution, { institution = it }, label = { Text("Institution (optional)") }, singleLine = true); AmountField(amount, { amount = it }, "Opening balance (PKR)"); OutlinedTextField(notes, { notes = it }, label = { Text("Notes (optional)") }, singleLine = true) } }, confirmButton = { Button(onClick = { vm.updateAccount(account.id, name, PkrMoneyInput.toMinorUnits(amount), institution.takeIf { it.isNotBlank() }, notes.takeIf { it.isNotBlank() }); onDismiss() }, enabled = name.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(amount) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+    var type by rememberSaveable { mutableStateOf(account.accountType) }; var accountContext by rememberSaveable { mutableStateOf(account.context ?: "Personal / Home") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Edit account") }, text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedTextField(name, { name = it }, label = { Text("Account name") }, singleLine = true); Text("Type"); Row(Modifier.horizontalScroll(rememberScrollState()), Arrangement.spacedBy(4.dp)) { listOf("CASH", "BANK", "WALLET", "OTHER").forEach { option -> FilterChip(type == option, { type = option }, { Text(option.lowercase().replaceFirstChar(Char::uppercase)) }) } }; OutlinedTextField(accountContext, { accountContext = it }, label = { Text("Context (optional)") }, singleLine = true); OutlinedTextField(institution, { institution = it }, label = { Text("Institution (optional)") }, singleLine = true); AmountField(amount, { amount = it }, "Opening balance (PKR)"); OutlinedTextField(notes, { notes = it }, label = { Text("Notes (optional)") }, singleLine = true) } }, confirmButton = { Button(onClick = { vm.updateAccount(account.id, name, type, PkrMoneyInput.toMinorUnits(amount), institution.takeIf { it.isNotBlank() }, notes.takeIf { it.isNotBlank() }, accountContext.takeIf { it.isNotBlank() }); onDismiss() }, enabled = name.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(amount) }.isSuccess) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }
 
-@Composable private fun AddEventDialog(vm: MainViewModel, accounts: List<AccountEntity>, onDismiss: () -> Unit) {
-    var amount by rememberSaveable { mutableStateOf("") }; var description by rememberSaveable { mutableStateOf("") }; var category by rememberSaveable { mutableStateOf("") }; var income by rememberSaveable { mutableStateOf(true) }; var accountId by rememberSaveable { mutableStateOf(accounts.firstOrNull()?.id.orEmpty()) }
+@Composable private fun AddEventDialog(vm: MainViewModel, accounts: List<AccountEntity>, initialIncome: Boolean, onDismiss: () -> Unit) {
+    var amount by rememberSaveable { mutableStateOf("") }; var description by rememberSaveable { mutableStateOf("") }; var category by rememberSaveable { mutableStateOf("") }; var income by rememberSaveable { mutableStateOf(initialIncome) }; var accountId by rememberSaveable { mutableStateOf(accounts.firstOrNull()?.id.orEmpty()) }
     var date by rememberSaveable { mutableStateOf(java.time.LocalDate.now()) }
     var incomeSourceId by rememberSaveable { mutableStateOf<String?>(null) }
     var showNewIncomeSource by rememberSaveable { mutableStateOf(false) }
@@ -1056,10 +1142,10 @@ private fun maskReferenceNumber(ref: String): String {
 
 @Composable
 private fun CategoryIcon(category: String, modifier: Modifier = Modifier) {
-    val icon = when (category) {
-        "Electricity" -> Icons.Filled.FlashOn
-        "Telephone" -> Icons.Filled.Phone
-        "Gas" -> Icons.Filled.Star
+    val icon = when (UtilityCategory.fromStored(category)) {
+        UtilityCategory.ELECTRICITY -> Icons.Filled.FlashOn
+        UtilityCategory.MOBILE_TELEPHONE -> Icons.Filled.Phone
+        UtilityCategory.GAS -> Icons.Filled.Star
         else -> Icons.Filled.Description
     }
     Icon(icon, contentDescription = category, modifier = modifier)
@@ -1114,7 +1200,7 @@ private fun BillsScreen(vm: MainViewModel, application: PassportApplication, pad
             val matchesSearch = profile.name.contains(searchQuery, ignoreCase = true) ||
                     profile.referenceNumber.contains(searchQuery, ignoreCase = true) ||
                     (profile.provider ?: "").contains(searchQuery, ignoreCase = true)
-            val matchesCategory = selectedCategoryFilter == "All" || profile.category == selectedCategoryFilter
+            val matchesCategory = selectedCategoryFilter == "All" || UtilityCategory.canonicalLabel(profile.category) == selectedCategoryFilter
             val matchesStatus = when (selectedStatusFilter) {
                 "Active" -> profile.status == "ACTIVE"
                 "Archived" -> profile.status == "ARCHIVED"
@@ -1125,7 +1211,7 @@ private fun BillsScreen(vm: MainViewModel, application: PassportApplication, pad
     }
 
     val groupedProfiles = remember(filteredProfiles) {
-        filteredProfiles.groupBy { it.category }
+        filteredProfiles.groupBy { UtilityCategory.canonicalLabel(it.category) }
     }
 
         Column(
@@ -1155,7 +1241,7 @@ private fun BillsScreen(vm: MainViewModel, application: PassportApplication, pad
                 }
             }
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("All", "Electricity", "Gas", "Telephone", "Other").forEach { catOpt ->
+                (listOf("All") + UtilityCategory.selectable.map { it.label }).forEach { catOpt ->
                     FilterChip(
                         selected = selectedCategoryFilter == catOpt,
                         onClick = { selectedCategoryFilter = catOpt },
@@ -1254,7 +1340,7 @@ private fun HistoryScreen(vm: MainViewModel, application: PassportApplication, p
 
             val matchesStatus = selectedStatus == "All" || occ.status.equals(selectedStatus, ignoreCase = true)
 
-            val matchesCategory = selectedCategory == "All" || profile.category.equals(selectedCategory, ignoreCase = true)
+            val matchesCategory = selectedCategory == "All" || UtilityCategory.canonicalLabel(profile.category) == selectedCategory
 
             val matchesYear = selectedYear == "All" || occ.billingYear.toString() == selectedYear
 
@@ -1306,7 +1392,7 @@ private fun HistoryScreen(vm: MainViewModel, application: PassportApplication, p
                     Text("Category: $selectedCategory")
                 }
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    listOf("All", "Electricity", "Gas", "Water", "Internet", "Telephone", "Other").forEach { opt ->
+                    (listOf("All") + UtilityCategory.selectable.map { it.label }).forEach { opt ->
                         DropdownMenuItem(
                             text = { Text(opt) },
                             onClick = { selectedCategory = opt; expanded = false },
@@ -1439,7 +1525,7 @@ private fun AddBillDialog(
 ) {
     val context = LocalContext.current
     var name by rememberSaveable { mutableStateOf(profileToEdit?.name ?: "") }
-    var category by rememberSaveable { mutableStateOf(profileToEdit?.category ?: "Electricity") }
+    var category by rememberSaveable { mutableStateOf(UtilityCategory.canonicalLabel(profileToEdit?.category ?: "Electricity")) }
     var customCategoryName by rememberSaveable { mutableStateOf(profileToEdit?.customCategoryName ?: "") }
     var referenceNumber by rememberSaveable { mutableStateOf(profileToEdit?.referenceNumber ?: "") }
     var provider by rememberSaveable { mutableStateOf(profileToEdit?.provider ?: "") }
@@ -1487,7 +1573,7 @@ private fun AddBillDialog(
                 OutlinedTextField(name, { name = it }, label = { Text("Bill Name") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("bill-name"))
                 Text("Category")
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    listOf("Electricity", "Gas", "Telephone", "Other").forEach { cat ->
+                    UtilityCategory.selectable.map { it.label }.forEach { cat ->
                         FilterChip(
                             selected = category == cat,
                             onClick = { category = cat },
@@ -1925,6 +2011,7 @@ private fun MonthlyOccurrenceDetailsDialog(
     onDismiss: () -> Unit
 ) {
     val profiles by vm.utilityProfiles.collectAsState()
+    val activeAccounts by vm.activeAccounts.collectAsState()
     val profile = remember(profiles, occurrence) { profiles.find { it.id == occurrence.profileId } }
     if (profile == null) {
         onDismiss()
@@ -1951,6 +2038,7 @@ private fun MonthlyOccurrenceDetailsDialog(
     var bankName by remember { mutableStateOf("") }
     var transactionReference by remember { mutableStateOf("") }
     var payNotes by remember { mutableStateOf("") }
+    var paidFromAccountId by remember { mutableStateOf("") }
 
     // Skip notes
     var skipNotes by remember { mutableStateOf("") }
@@ -1958,6 +2046,19 @@ private fun MonthlyOccurrenceDetailsDialog(
     var paymentRecord by remember { mutableStateOf<PaymentRecordEntity?>(null) }
     LaunchedEffect(occurrence) {
         paymentRecord = vm.getPaymentForOccurrence(occurrence.id)
+        paymentRecord?.let { payment ->
+            payAmount = (payment.amountPaidMinor / 100).toString()
+            paymentDate = java.time.LocalDate.ofEpochDay(payment.paymentDateEpochDay)
+            paymentMode = payment.paymentMode
+            paidFromAccountId = payment.accountId.orEmpty()
+            bankName = payment.bankName.orEmpty()
+            transactionReference = payment.transactionReference.orEmpty()
+            payNotes = payment.notes.orEmpty()
+        }
+        if (paidFromAccountId.isBlank()) paidFromAccountId = activeAccounts.firstOrNull()?.id.orEmpty()
+    }
+    LaunchedEffect(activeAccounts) {
+        if (paidFromAccountId.isBlank()) paidFromAccountId = activeAccounts.firstOrNull()?.id.orEmpty()
     }
 
     var previewAttachmentTarget by remember { mutableStateOf<BillAttachmentEntity?>(null) }
@@ -1984,6 +2085,7 @@ private fun MonthlyOccurrenceDetailsDialog(
                     Text("Record Payment", style = MaterialTheme.typography.titleMedium)
                     AmountField(payAmount, { payAmount = it }, "Amount Paid (PKR)", modifier = Modifier.testTag("pay-amount"))
                     DateField("Payment Date", paymentDate, { paymentDate = it }, testTag = "pay-date")
+                    AccountPicker("Paid From", activeAccounts, paidFromAccountId) { paidFromAccountId = it }
 
                     Text("Payment Mode")
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2032,6 +2134,7 @@ private fun MonthlyOccurrenceDetailsDialog(
                                 Text("Amount Paid: ${formatPkr(paymentRecord!!.amountPaidMinor)}")
                                 Text("Date Paid: ${java.time.LocalDate.ofEpochDay(paymentRecord!!.paymentDateEpochDay).format(java.time.format.DateTimeFormatter.ofPattern("d MMM yyyy"))}")
                                 Text("Mode: ${paymentRecord!!.paymentMode}")
+                                Text("Paid from: ${activeAccounts.firstOrNull { it.id == paymentRecord!!.accountId }?.name ?: "Legacy payment — account not linked"}")
                                 if (paymentRecord!!.bankName != null) Text("Bank: ${paymentRecord!!.bankName}")
                                 if (paymentRecord!!.transactionReference != null) Text("Reference: ${paymentRecord!!.transactionReference}")
                                 if (paymentRecord!!.notes != null) Text("Notes: ${paymentRecord!!.notes}")
@@ -2106,6 +2209,7 @@ private fun MonthlyOccurrenceDetailsDialog(
                 Button(
                     onClick = {
                         val amtPaidMinor = PkrMoneyInput.toMinorUnits(payAmount, false)
+                        val existing = paymentRecord
                         val payment = PaymentRecordEntity(
                             id = UUID.randomUUID().toString(),
                             occurrenceId = occurrence.id,
@@ -2116,9 +2220,14 @@ private fun MonthlyOccurrenceDetailsDialog(
                             transactionReference = transactionReference.trim().takeIf { it.isNotEmpty() },
                             notes = payNotes.trim().takeIf { it.isNotEmpty() },
                             createdAtEpochMillis = System.currentTimeMillis(),
-                            updatedAtEpochMillis = System.currentTimeMillis()
+                            updatedAtEpochMillis = System.currentTimeMillis(),
+                            accountId = paidFromAccountId,
                         )
-                        vm.addPayment(context, payment)
+                        if (existing == null) {
+                            vm.addPayment(context, payment)
+                        } else {
+                            vm.updatePayment(context, existing.id, occurrence.id, amtPaidMinor, paymentDate.toEpochDay(), paymentMode, paidFromAccountId, bankName.trim().takeIf { it.isNotEmpty() }, transactionReference.trim().takeIf { it.isNotEmpty() }, payNotes.trim().takeIf { it.isNotEmpty() })
+                        }
                         val finalAmtMinor = billAmount.takeIf { it.isNotBlank() }?.let { PkrMoneyInput.toMinorUnits(it, false) } ?: amtPaidMinor
                         vm.updateMonthlyOccurrence(context, occurrence.copy(
                             actualIssueDateEpochDay = actualIssueDate.toEpochDay().takeIf { setActualIssueDate },
@@ -2129,7 +2238,7 @@ private fun MonthlyOccurrenceDetailsDialog(
                         ))
                         onDismiss()
                     },
-                    enabled = runCatching { PkrMoneyInput.parseRupees(payAmount, false) }.isSuccess && PkrMoneyInput.toMinorUnits(payAmount, false) > 0,
+                    enabled = paidFromAccountId.isNotBlank() && runCatching { PkrMoneyInput.parseRupees(payAmount, false) }.isSuccess && PkrMoneyInput.toMinorUnits(payAmount, false) > 0,
                     modifier = Modifier.testTag("save-payment-button")
                 ) {
                     Text("Save Payment")
@@ -2151,6 +2260,10 @@ private fun MonthlyOccurrenceDetailsDialog(
             } else {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (paymentRecord != null) {
+                        OutlinedButton(
+                            onClick = { showPayForm = true },
+                            modifier = Modifier.weight(1f).testTag("edit-payment-button")
+                        ) { Text("Edit Payment") }
                         Button(
                             onClick = {
                                 vm.deletePayment(context, paymentRecord!!.id, occurrence.id)

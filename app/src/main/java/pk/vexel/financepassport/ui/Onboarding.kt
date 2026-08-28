@@ -34,7 +34,7 @@ private data class OnboardingPage(val title: String, val body: String)
 private val onboardingPages = listOf(
     OnboardingPage(
         "Welcome to Vexel Finance Passport",
-        "A private, offline-first monthly utility bill tracker.\n\nRegister recurring monthly utility bills once, automatically create each monthly bill occurrence, track unpaid obligations, and keep your payment history safe on this device."
+        "A private, offline-first personal financial organizer built around a polished monthly utility tracker.\n\nTrack accounts, everyday money activity, recurring utility bills, unpaid obligations, and payment history on this device."
     ),
     OnboardingPage(
         "Your privacy, your device",

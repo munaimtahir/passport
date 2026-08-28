@@ -74,7 +74,8 @@ class UtilityAttachmentVault(
             mimeType = mime,
             sizeBytes = bytes.size.toLong(),
             fileHash = digest,
-            createdAtEpochMillis = System.currentTimeMillis()
+            createdAtEpochMillis = System.currentTimeMillis(),
+            linkedEntityType = if (attachmentType == "PAYMENT_PROOF") "PAYMENT" else "OCCURRENCE",
         )
         repository.addAttachment(attachment)
         return attachment

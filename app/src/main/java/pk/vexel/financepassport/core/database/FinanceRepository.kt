@@ -17,6 +17,7 @@ import pk.vexel.financepassport.core.model.calculateCategoryBudgets
 import pk.vexel.financepassport.core.model.calculateFinancialPosition
 import pk.vexel.financepassport.core.model.calculateGoalProgress
 import pk.vexel.financepassport.core.model.advanceRecurringDueDate
+import pk.vexel.financepassport.core.model.UtilityCategory
 import pk.vexel.financepassport.core.model.toYearMonth
 import java.time.Instant
 import java.util.UUID
@@ -80,7 +81,18 @@ class FinanceRepository(private val db: AppDatabase) {
     }
 
     suspend fun deleteUtilityProfile(id: String) {
-        db.utilityBillDao().delete(id)
+        db.withTransaction {
+            val occurrences = db.monthlyBillOccurrenceDao().getByProfile(id)
+            val payments = occurrences.mapNotNull { db.paymentRecordDao().getForOccurrence(it.id) }
+            payments.forEach { payment ->
+                db.paymentRecordDao().delete(payment.id)
+                payment.financialEventId?.let { db.financialEventDao().deleteById(it) }
+            }
+            db.billAttachmentDao().deleteForLinkedEntities(
+                listOf(id) + occurrences.map { it.id } + payments.map { it.id },
+            )
+            db.utilityBillDao().delete(id)
+        }
     }
 
     suspend fun addMonthlyOccurrence(occurrence: MonthlyBillOccurrenceEntity) {
@@ -92,19 +104,77 @@ class FinanceRepository(private val db: AppDatabase) {
     }
 
     suspend fun deleteMonthlyOccurrence(id: String) {
-        db.monthlyBillOccurrenceDao().delete(id)
+        db.withTransaction {
+            db.paymentRecordDao().getForOccurrence(id)?.let { payment ->
+                db.billAttachmentDao().deleteForLinkedEntities(listOf(payment.id))
+                db.paymentRecordDao().delete(payment.id)
+                payment.financialEventId?.let { db.financialEventDao().deleteById(it) }
+            }
+            db.billAttachmentDao().deleteForLinkedEntities(listOf(id))
+            db.monthlyBillOccurrenceDao().delete(id)
+        }
     }
 
     suspend fun addPayment(payment: PaymentRecordEntity) {
-        db.paymentRecordDao().insert(payment)
+        require(payment.amountPaidMinor > 0) { "Payment amount must be greater than zero" }
+        val accountId = requireNotNull(payment.accountId) { "Paid-from account is required" }
+        require(db.accountDao().getById(accountId)?.status == "ACTIVE") { "Choose an active account" }
+        db.withTransaction {
+            // The occurrence uniqueness constraint is the idempotency key for repeated UI/worker calls.
+            if (db.paymentRecordDao().getForOccurrence(payment.occurrenceId) != null) return@withTransaction
+            val occurrence = db.monthlyBillOccurrenceDao().getById(payment.occurrenceId) ?: error("Bill occurrence not found")
+            val profile = db.utilityBillDao().getById(occurrence.profileId) ?: error("Utility profile not found")
+            val eventId = payment.financialEventId ?: UUID.randomUUID().toString()
+            val now = Instant.now().toEpochMilli()
+            val month = java.time.YearMonth.of(occurrence.billingYear, occurrence.billingMonth)
+                .format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))
+            val category = UtilityCategory.fromStored(profile.category).label
+            db.financialEventDao().upsert(
+                FinancialEventEntity(
+                    id = eventId,
+                    eventType = FinancialEventType.EXPENSE.name,
+                    dateEpochDay = payment.paymentDateEpochDay,
+                    amountMinor = payment.amountPaidMinor,
+                    currency = "PKR",
+                    accountId = accountId,
+                    category = "Utilities",
+                    description = "${profile.name} — $month",
+                    notes = "Utility: ${profile.name}; Category: $category; Billing period: $month; Payment: ${payment.id}; Occurrence: ${occurrence.id}",
+                    taxRelevance = "UNKNOWN",
+                    deletedAtEpochMillis = null,
+                    createdAtEpochMillis = now,
+                    updatedAtEpochMillis = now,
+                ),
+            )
+            db.paymentRecordDao().insert(payment.copy(accountId = accountId, financialEventId = eventId))
+        }
     }
 
-    suspend fun updatePayment(id: String, amountPaid: Long, paymentDate: Long, mode: String, bank: String?, reference: String?, notes: String?, updatedAt: Long) {
-        db.paymentRecordDao().updateDetails(id, amountPaid, paymentDate, mode, bank, reference, notes, updatedAt)
+    suspend fun updatePayment(id: String, amountPaid: Long, paymentDate: Long, mode: String, accountId: String, bank: String?, reference: String?, notes: String?, updatedAt: Long) {
+        require(amountPaid > 0) { "Payment amount must be greater than zero" }
+        require(db.accountDao().getById(accountId)?.status == "ACTIVE") { "Choose an active account" }
+        db.withTransaction {
+            val payment = db.paymentRecordDao().getById(id) ?: error("Payment not found")
+            val eventId = payment.financialEventId ?: UUID.randomUUID().toString()
+            val event = db.financialEventDao().getById(eventId) ?: run {
+                val occurrence = db.monthlyBillOccurrenceDao().getById(payment.occurrenceId) ?: error("Bill occurrence not found")
+                val profile = db.utilityBillDao().getById(occurrence.profileId) ?: error("Utility profile not found")
+                val month = java.time.YearMonth.of(occurrence.billingYear, occurrence.billingMonth)
+                    .format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))
+                FinancialEventEntity(eventId, FinancialEventType.EXPENSE.name, paymentDate, amountPaid, "PKR", accountId, "Utilities", "${profile.name} — $month", "Utility: ${profile.name}; Category: ${UtilityCategory.canonicalLabel(profile.category)}; Billing period: $month; Payment: ${payment.id}; Occurrence: ${occurrence.id}", "UNKNOWN", null, updatedAt, updatedAt)
+            }
+            db.paymentRecordDao().update(payment.copy(amountPaidMinor = amountPaid, paymentDateEpochDay = paymentDate, paymentMode = mode, accountId = accountId, financialEventId = eventId, bankName = bank, transactionReference = reference, notes = notes, updatedAtEpochMillis = updatedAt))
+            db.financialEventDao().upsert(event.copy(amountMinor = amountPaid, dateEpochDay = paymentDate, accountId = accountId, updatedAtEpochMillis = updatedAt))
+        }
     }
 
     suspend fun deletePayment(id: String) {
-        db.paymentRecordDao().delete(id)
+        db.withTransaction {
+            val payment = db.paymentRecordDao().getById(id) ?: return@withTransaction
+            db.billAttachmentDao().deleteForLinkedEntities(listOf(payment.id))
+            db.paymentRecordDao().delete(id)
+            payment.financialEventId?.let { db.financialEventDao().deleteById(it) }
+        }
     }
 
     suspend fun addAttachment(attachment: BillAttachmentEntity) {
@@ -118,7 +188,8 @@ class FinanceRepository(private val db: AppDatabase) {
     fun observeAttachments(linkedId: String): Flow<List<BillAttachmentEntity>> =
         db.billAttachmentDao().observeForLinkedEntity(linkedId)
 
-    val accounts: Flow<List<AccountEntity>> = db.accountDao().observeActive()
+    val accounts: Flow<List<AccountEntity>> = db.accountDao().observeAll()
+    val activeAccounts: Flow<List<AccountEntity>> = db.accountDao().observeActive()
     val incomeSources: Flow<List<IncomeSourceEntity>> = db.incomeSourceDao().observeActive()
     val recentEvents: Flow<List<FinancialEventEntity>> = db.financialEventDao().observeRecent(200)
     val activeEventCount: Flow<Int> = db.financialEventDao().observeActiveCount()
@@ -182,12 +253,14 @@ class FinanceRepository(private val db: AppDatabase) {
 
     fun accountMovement(accountId: String): Flow<Long> = db.financialEventDao().observeAccountMovement(accountId)
 
-    suspend fun addAccount(name: String, type: String, openingBalanceMinor: Long, currency: String = "PKR", institution: String? = null, notes: String? = null) {
+    suspend fun addAccount(name: String, type: String, openingBalanceMinor: Long, currency: String = "PKR", institution: String? = null, notes: String? = null, context: String? = null) {
+        require(name.isNotBlank() && openingBalanceMinor >= 0) { "Account details are invalid" }
+        require(type.isNotBlank()) { "Account type is required" }
         val now = Instant.now().toEpochMilli()
         db.accountDao().upsert(
             AccountEntity(
                 UUID.randomUUID().toString(), name.trim(), institution?.trim()?.takeIf { it.isNotEmpty() }, type, null, null,
-                currency, openingBalanceMinor, LocalDate.now().toEpochDay(), "ACTIVE", notes?.trim()?.takeIf { it.isNotEmpty() }, now, now,
+                currency, openingBalanceMinor, LocalDate.now().toEpochDay(), "ACTIVE", notes?.trim()?.takeIf { it.isNotEmpty() }, now, now, context,
             ),
         )
     }
@@ -206,16 +279,37 @@ class FinanceRepository(private val db: AppDatabase) {
         db.incomeSourceDao().archive(id, Instant.now().toEpochMilli())
     }
 
-    suspend fun updateAccount(id: String, name: String, openingBalanceMinor: Long, institution: String? = null, notes: String? = null) {
+    suspend fun updateAccount(id: String, name: String, openingBalanceMinor: Long, institution: String? = null, notes: String? = null, type: String? = null, context: String? = null) {
         require(name.isNotBlank() && openingBalanceMinor >= 0) { "Account details are invalid" }
-        require(db.accountDao().getById(id) != null) { "Account not found" }
-        db.accountDao().updateDetails(id, name.trim(), openingBalanceMinor, institution?.trim()?.takeIf { it.isNotEmpty() }, notes?.trim()?.takeIf { it.isNotEmpty() }, Instant.now().toEpochMilli())
+        val existing = db.accountDao().getById(id) ?: error("Account not found")
+        val finalType = type ?: existing.accountType
+        require(finalType.isNotBlank()) { "Account type is required" }
+        db.accountDao().updateDetails(id, name.trim(), finalType, context ?: existing.context, openingBalanceMinor, institution?.trim()?.takeIf { it.isNotEmpty() }, notes?.trim()?.takeIf { it.isNotEmpty() }, Instant.now().toEpochMilli())
     }
 
     suspend fun archiveAccount(id: String) {
         require(db.accountDao().getById(id) != null) { "Account not found" }
         db.accountDao().archive(id, Instant.now().toEpochMilli())
     }
+
+    suspend fun reactivateAccount(id: String) {
+        require(db.accountDao().getById(id) != null) { "Account not found" }
+        db.accountDao().reactivate(id, Instant.now().toEpochMilli())
+    }
+
+    suspend fun utilityAttachmentsForProfile(profileId: String): List<BillAttachmentEntity> {
+        val occurrences = db.monthlyBillOccurrenceDao().getByProfile(profileId)
+        val payments = occurrences.mapNotNull { db.paymentRecordDao().getForOccurrence(it.id) }
+        return db.billAttachmentDao().getForLinkedEntities(listOf(profileId) + occurrences.map { it.id } + payments.map { it.id })
+    }
+
+    suspend fun utilityAttachmentsForOccurrence(occurrenceId: String): List<BillAttachmentEntity> {
+        val paymentId = db.paymentRecordDao().getForOccurrence(occurrenceId)?.id
+        return db.billAttachmentDao().getForLinkedEntities(listOfNotNull(occurrenceId, paymentId))
+    }
+
+    suspend fun utilityAttachmentsForPayment(paymentId: String): List<BillAttachmentEntity> =
+        db.billAttachmentDao().getForLinkedEntities(listOf(paymentId))
 
     suspend fun addAsset(title: String, type: String, valueMinor: Long) {
         db.wealthDao().upsertAsset(AssetEntity(UUID.randomUUID().toString(), type, title.trim(), LocalDate.now().toEpochDay(), valueMinor, valueMinor, "PKR", 100, null, null, "ACTIVE"))

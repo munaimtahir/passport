@@ -61,6 +61,8 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     }
 
     fun deleteUtilityProfile(context: android.content.Context, id: String) = write {
+        val vault = pk.vexel.financepassport.core.files.UtilityAttachmentVault(context, repository)
+        repository.utilityAttachmentsForProfile(id).forEach(vault::delete)
         repository.database.monthlyBillOccurrenceDao().getByProfile(id).forEach { occ ->
             repository.cancelUtilityReminders(context, occ.id)
         }
@@ -82,6 +84,8 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     }
 
     fun deleteMonthlyOccurrence(context: android.content.Context, id: String) = write {
+        val vault = pk.vexel.financepassport.core.files.UtilityAttachmentVault(context, repository)
+        repository.utilityAttachmentsForOccurrence(id).forEach(vault::delete)
         repository.cancelUtilityReminders(context, id)
         repository.deleteMonthlyOccurrence(id)
     }
@@ -96,8 +100,8 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
         }
     }
 
-    fun updatePayment(context: android.content.Context, id: String, occurrenceId: String, amountPaid: Long, paymentDate: Long, mode: String, bank: String?, reference: String?, notes: String?) = write {
-        repository.updatePayment(id, amountPaid, paymentDate, mode, bank, reference, notes, System.currentTimeMillis())
+    fun updatePayment(context: android.content.Context, id: String, occurrenceId: String, amountPaid: Long, paymentDate: Long, mode: String, accountId: String, bank: String?, reference: String?, notes: String?) = write {
+        repository.updatePayment(id, amountPaid, paymentDate, mode, accountId, bank, reference, notes, System.currentTimeMillis())
         repository.cancelUtilityReminders(context, occurrenceId)
         repository.database.monthlyBillOccurrenceDao().getById(occurrenceId)?.let { occ ->
             repository.database.utilityBillDao().getById(occ.profileId)?.let { profile ->
@@ -107,6 +111,8 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     }
 
     fun deletePayment(context: android.content.Context, id: String, occurrenceId: String) = write {
+        val vault = pk.vexel.financepassport.core.files.UtilityAttachmentVault(context, repository)
+        repository.utilityAttachmentsForPayment(id).forEach(vault::delete)
         repository.deletePayment(id)
         repository.database.monthlyBillOccurrenceDao().getById(occurrenceId)?.let { occ ->
             repository.database.utilityBillDao().getById(occ.profileId)?.let { profile ->
@@ -133,6 +139,7 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
         preferences.setPrivacyMode(privacyModeEnabled)
     }
     val accounts = repository.accounts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val activeAccounts = repository.activeAccounts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val incomeSources = repository.incomeSources.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val recentEvents = repository.recentEvents.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val activeEventCount = repository.activeEventCount.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
@@ -172,10 +179,11 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
         return repository.database.paymentRecordDao().getForOccurrence(occurrenceId)
     }
 
-    fun addAccount(name: String, type: String, openingBalanceMinor: Long, institution: String? = null, notes: String? = null) = write { repository.addAccount(name, type, openingBalanceMinor, institution = institution, notes = notes) }
+    fun addAccount(name: String, type: String, openingBalanceMinor: Long, institution: String? = null, notes: String? = null, context: String? = null) = write { repository.addAccount(name, type, openingBalanceMinor, institution = institution, notes = notes, context = context) }
     fun accountMovement(accountId: String) = repository.accountMovement(accountId)
-    fun updateAccount(id: String, name: String, openingBalanceMinor: Long, institution: String? = null, notes: String? = null) = write { repository.updateAccount(id, name, openingBalanceMinor, institution, notes) }
+    fun updateAccount(id: String, name: String, type: String, openingBalanceMinor: Long, institution: String? = null, notes: String? = null, context: String? = null) = write { repository.updateAccount(id, name, openingBalanceMinor, institution, notes, type, context) }
     fun archiveAccount(id: String) = write { repository.archiveAccount(id) }
+    fun reactivateAccount(id: String) = write { repository.reactivateAccount(id) }
     fun addEvent(type: FinancialEventType, amountMinor: Long, accountId: String, description: String, category: String? = null, date: LocalDate = LocalDate.now(), incomeSourceId: String? = null) = write { repository.addEvent(type, amountMinor, accountId, description, category, date = date, incomeSourceId = incomeSourceId) }
     fun addIncomeSource(name: String, sourceType: String, payerOrEmployer: String? = null) = write { repository.addIncomeSource(name, sourceType, payerOrEmployer) }
     fun addRecurringItem(context: android.content.Context, title: String, type: FinancialEventType, amountMinor: Long, accountId: String, category: String?, frequency: String, delayDays: Long) = write { repository.addRecurringItem(context, title, type, amountMinor, accountId, category, frequency, delayDays) }
