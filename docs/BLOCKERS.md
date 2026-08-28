@@ -11,4 +11,6 @@
 | 2026-08-28 | 24 | This Linux host exposes no `/dev/kvm` and had no attached device/AVD. An API 36 image and Pixel 8 AVD were installed, but three TCG software-emulation boots either crashed on a QEMU CPU hang or remained in first-boot dexopt without `sys.boot_completed`; APK installation was rejected as `device is still booting`. | Host gates and instrumentation-APK compilation are authoritative only; no connected result is claimed | Connected tests, migration execution, ADB scenario, process death, UI review, live backup/restore | Before Sprint 24 can receive PASS |
 
 No blocker prevents local implementation or host QA. The Sprint 24 device-qualification blocker
-above prevents its mandatory connected acceptance gate from receiving PASS.
+above prevents its mandatory connected acceptance gate from receiving PASS. Follow
+`docs/verification/SPRINT_24_DEVICE_TEST_PLAN.md` on a workstation with a booted API 36 ADB target
+to resolve and record that gate.

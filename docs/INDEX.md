@@ -23,3 +23,5 @@
 - `tax_event_taxonomy.json`
 - `19_INITIAL_REPOSITORY_STRUCTURE.md`
 - `20_DEFINITION_OF_READY.md`
+- `verification/SPRINT_24_DEVICE_TEST_PLAN.md` — clone, ADB, connected-test and manual device
+  qualification handoff for the Sprint 24 unified ledger

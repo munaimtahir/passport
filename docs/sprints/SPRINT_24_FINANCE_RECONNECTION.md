@@ -105,6 +105,8 @@ events; no utility-specific report calculator was added.
 The only Sprint 24 acceptance gap is external device qualification: connected tests, UI/ADB scenario,
 visual review, process death and live backup/restore remain unverified. The implementation must not
 be called a full PASS until those gates run on an API 36 emulator/device with hardware acceleration.
+The clone-to-device-workstation procedure, exact financial fixtures, expected balances and evidence
+template are documented in `docs/verification/SPRINT_24_DEVICE_TEST_PLAN.md`.
 
 ## Release state
 
