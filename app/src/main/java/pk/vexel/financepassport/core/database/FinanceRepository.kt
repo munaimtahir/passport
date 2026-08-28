@@ -66,7 +66,7 @@ class FinanceRepository(private val db: AppDatabase) {
     }
 
     suspend fun updateUtilityProfile(profile: UtilityBillProfileEntity) {
-        db.utilityBillDao().upsert(profile)
+        db.utilityBillDao().update(profile)
     }
 
     suspend fun archiveUtilityProfile(id: String, archiveDate: Long) {
@@ -75,7 +75,7 @@ class FinanceRepository(private val db: AppDatabase) {
 
     suspend fun reactivateUtilityProfile(id: String, reactivateMonth: String, now: Long) {
         db.utilityBillDao().getById(id)?.let { profile ->
-            db.utilityBillDao().upsert(profile.copy(status = "ACTIVE", recurrenceStartMonth = reactivateMonth, updatedAtEpochMillis = now))
+            db.utilityBillDao().update(profile.copy(status = "ACTIVE", recurrenceStartMonth = reactivateMonth, updatedAtEpochMillis = now))
         }
     }
 

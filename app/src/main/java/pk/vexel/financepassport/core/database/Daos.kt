@@ -393,6 +393,14 @@ interface UtilityBillDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(profile: UtilityBillProfileEntity)
 
+    // See MonthlyBillOccurrenceDao.update()'s comment: upsert() (INSERT OR REPLACE) deletes and
+    // reinserts the row, which cascade-deletes every monthly_bill_occurrences row (and, through
+    // that, their payment_records) for this profile via ON DELETE CASCADE. Editing or
+    // reactivating a profile that already has billing history must never touch that history, so
+    // both go through a real UPDATE instead; upsert() stays for creating a brand-new profile.
+    @Update
+    suspend fun update(profile: UtilityBillProfileEntity)
+
     @Query("UPDATE utility_bill_profiles SET status = :status, updatedAtEpochMillis = :updatedAt WHERE id = :id")
     suspend fun updateStatus(id: String, status: String, updatedAt: Long)
     
@@ -423,14 +431,19 @@ interface MonthlyBillOccurrenceDao {
     @Query("SELECT * FROM monthly_bill_occurrences WHERE status = :status ORDER BY expectedDueDateEpochDay ASC")
     suspend fun getByStatus(status: String): List<MonthlyBillOccurrenceEntity>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    // ABORT (not REPLACE): this is only ever called to insert a brand-new occurrence — every
+    // call site checks non-existence first (UtilityRecurrenceEngine's generation loop checks
+    // getForMonth() == null; the "add missing historical occurrence" dialog checks the in-memory
+    // list). If a genuine bug or race ever produced a duplicate on the (profileId, billingYear,
+    // billingMonth) unique index anyway, REPLACE would silently delete the existing occurrence —
+    // cascade-deleting its payment_records via ON DELETE CASCADE — instead of surfacing the bug.
+    @Insert(onConflict = OnConflictStrategy.ABORT)
     suspend fun upsert(occurrence: MonthlyBillOccurrenceEntity)
 
-    // @Update issues a plain UPDATE statement. Unlike upsert() (INSERT OR REPLACE, which SQLite
-    // implements as DELETE-then-INSERT), it never deletes the row, so it cannot cascade-delete
-    // the occurrence's payment_records/bill_attachments children via their ON DELETE CASCADE
-    // foreign keys. Always use this for editing an occurrence that may already have a payment
-    // recorded against it; reserve upsert() for creating occurrences that don't exist yet.
+    // @Update issues a plain UPDATE statement, never a delete, so it cannot cascade-delete the
+    // occurrence's payment_records/bill_attachments children via their ON DELETE CASCADE foreign
+    // keys. Always use this for editing an occurrence that may already have a payment recorded
+    // against it; reserve upsert() for creating occurrences that don't exist yet.
     @Update
     suspend fun update(occurrence: MonthlyBillOccurrenceEntity)
 

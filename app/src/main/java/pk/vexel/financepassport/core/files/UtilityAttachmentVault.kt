@@ -17,17 +17,29 @@ class UtilityAttachmentVault(
 ) {
     suspend fun import(uri: Uri, linkedId: String, attachmentType: String): BillAttachmentEntity {
         val resolver = context.contentResolver
-        val mime = resolver.getType(uri) ?: "application/octet-stream"
+        // ContentResolver.getType() only reliably resolves content:// URIs (the normal SAF picker
+        // result); it returns null for file:// URIs and can also return a generic
+        // application/octet-stream from some picker sources. Fall back to the file extension via
+        // MimeTypeMap so a real PDF/JPEG/PNG/WebP is never rejected just because the source
+        // didn't populate a MIME type.
+        val mime = resolver.getType(uri)
+            ?.takeUnless { it == "application/octet-stream" }
+            ?: android.webkit.MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(uri.lastPathSegment?.substringAfterLast('.', "")?.lowercase())
+            ?: "application/octet-stream"
         val supportedMimes = setOf("application/pdf", "image/jpeg", "image/png", "image/webp")
         require(mime in supportedMimes) { "Supported attachments are PDF, JPEG, PNG or WebP" }
         
+        // OpenableColumns.DISPLAY_NAME only resolves for content:// URIs backed by a
+        // ContentProvider (the normal SAF picker result); fall back to the URI's own last path
+        // segment (works for file:// URIs) before giving up on a real name entirely.
         val displayName = runCatching {
             context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
                 val nameIndex = cursor.getColumnIndexOrThrow(android.provider.OpenableColumns.DISPLAY_NAME)
                 cursor.moveToFirst()
                 cursor.getString(nameIndex)
             }
-        }.getOrNull() ?: "attachment_${System.currentTimeMillis()}"
+        }.getOrNull() ?: uri.lastPathSegment ?: "attachment_${System.currentTimeMillis()}"
 
         val bytes = resolver.openInputStream(uri)?.use { stream ->
             stream.readBytes().also {

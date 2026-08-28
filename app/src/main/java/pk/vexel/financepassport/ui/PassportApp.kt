@@ -1108,7 +1108,6 @@ private fun BillsScreen(vm: MainViewModel, application: PassportApplication, pad
     var selectedCategoryFilter by rememberSaveable { mutableStateOf("All") }
     var selectedStatusFilter by rememberSaveable { mutableStateOf("Active") }
     var selectedProfileForDetails by remember { mutableStateOf<UtilityBillProfileEntity?>(null) }
-    var showAddBillDialog by rememberSaveable { mutableStateOf(false) }
 
     val filteredProfiles = remember(profiles, searchQuery, selectedCategoryFilter, selectedStatusFilter) {
         profiles.filter { profile ->
@@ -1129,20 +1128,10 @@ private fun BillsScreen(vm: MainViewModel, application: PassportApplication, pad
         filteredProfiles.groupBy { it.category }
     }
 
-    Scaffold(
-        floatingActionButton = {
-            if (selectedStatusFilter == "Active") {
-                FloatingActionButton(onClick = { showAddBillDialog = true }, modifier = Modifier.testTag("add-bill-fab")) {
-                    Icon(Icons.Default.Add, "Add Bill")
-                }
-            }
-        }
-    ) { innerPadding ->
         Column(
             Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(innerPadding)
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -1219,11 +1208,6 @@ private fun BillsScreen(vm: MainViewModel, application: PassportApplication, pad
                 }
             }
         }
-    }
-
-    if (showAddBillDialog) {
-        AddBillDialog(vm, application) { showAddBillDialog = false }
-    }
 
     selectedProfileForDetails?.let { profile ->
         UtilityProfileDetailsDialog(profile, vm, application, onDismiss = { selectedProfileForDetails = null })
@@ -1664,7 +1648,8 @@ private fun UtilityProfileDetailsDialog(
             Column(
                 modifier = Modifier
                     .heightIn(max = 480.dp)
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(rememberScrollState())
+                    .testTag("profile-details-scroll"),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
