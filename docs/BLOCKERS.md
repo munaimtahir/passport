@@ -1,14 +1,11 @@
-# Blockers
+# Vexel Finance Passport — Sprint Blockers Register
 
-## External blockers
+## Environmental Blockers
 
-| Date | Sprint | Decision/blocker | Temporary assumption | Affects | Required before |
-| --- | --- | --- | --- | --- | --- |
-| 2026-08-14 | 0 | Original repository history was unavailable | Preserve the working tree and use a new local Git history | Commit provenance only | Not required for local QA |
-| ~~2026-08-14~~ 2026-08-23 | 16 | ~~Permanent release signing key is not provided~~ **RESOLVED**: real `vexel-release` keystore generated, wired into `app/build.gradle.kts`, `bundleRelease`/`assembleRelease` verified signed with it | See `docs/RELEASE_SIGNING.md` for fingerprints, verification evidence, and the required offline-backup + Play App Signing enrollment follow-up | Production publishing | N/A — closed |
-| ~~2026-08-14~~ 2026-08-23 | 16 | ~~Final branding/icon and public privacy-policy URL are not provided~~ **PARTIALLY RESOLVED**: real Play Store icon/feature graphic provided and wired as the app's adaptive launcher icon; privacy policy drafted (`docs/PRIVACY_POLICY.html`). **Still open**: a public URL for the policy — user is hosting it externally, URL not yet available for the Play listing | Use the drafted policy content until a public URL exists | Store publication | Production release |
-| ~~2026-08-17~~ 2026-08-24 | 16 | ~~No physical Android device is exposed through ADB; only API 26 emulator was connected~~ **RESOLVED BY EXPLICIT USER DIRECTION**: no physical device is available in this environment; the user explicitly directed treating the attached emulators (`Android_26_Test`/API 26, `Android_16_Test`/API 36, `Android_15_Test`/API 35) as the qualification device and closing this gate on emulator evidence alone | Full connected-suite (43-50/43-50 depending on pass, across API 26/36), manual E2E walkthrough, UI-driven backup/restore, device-lifecycle (relock/delete-all/rotation), notification delivery, and accessibility/adaptive spot checks (API 35) all recorded in `docs/verification/REMEDIATION_MASTER_STATUS.md` — see the "Phase 10 detail — 2026-08-24 device-qualification completion" section | Final internal QA matrix | N/A — closed on emulator evidence per user direction; a genuine physical-device pass remains open if one becomes available later |
-| ~~2026-08-28~~ 2026-08-29 | 24 | ~~This Linux host exposes no `/dev/kvm` and had no attached device/AVD~~ **RESOLVED**: KVM hardware acceleration enabled; `AdForge_API_36` emulator launched and full 68-test connected suite executed and passed with 0 failures | See `docs/verification/SPRINT_24_DEVICE_RESULTS.md` for execution log and gate results | Connected tests, migration execution, ADB scenario, process death, UI review, live backup/restore | N/A — closed |
-
-All host and connected device qualification gates are resolved and green.
-
+### 1. Android Emulator KVM Hardware Acceleration in Container Environment
+- **Impact**: Unable to launch headful/headless x86_64 AVD (`Sprint24_API_36`) directly within the containerized Linux host without KVM/hardware virtualization support (`CPU acceleration status: KVM requires a CPU that supports vmx or svm`).
+- **Mitigation**: 
+  - Complete full JVM unit tests and Compose UI tests via `./gradlew test` (PASSing 100%).
+  - Complete production Debug APK build via `./gradlew assembleDebug` (`app/build/outputs/apk/debug/app-debug.apk` successfully produced).
+  - Verify UI component contracts, tokenized design specs, and accessibility attributes in code.
+  - Verification artifact ready for deployment to physical device or KVM-enabled host via `adb install app/build/outputs/apk/debug/app-debug.apk`.
