@@ -5,7 +5,6 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -31,16 +30,19 @@ import pk.vexel.financepassport.core.database.AppDatabase
 import pk.vexel.financepassport.core.database.DatabaseProvider
 
 /**
- * Phase 10 backup-equivalence item: the existing BackupRestoreDeviceTest cases prove the
- * repository/crypto round trip against fixture entities constructed directly, never through the
- * app's own UI validation. This test creates a record through the real Add-account dialog (same
- * path a user drives), backs up the live app database the UI just wrote to, deletes it to
- * simulate loss, restores via the production LiveRestoreService, and confirms the exact
- * UI-entered record survives intact on disk. The SAF file-picker chrome around "Create encrypted
- * backup"/"Restore encrypted backup" is not driven here (Compose UI tests cannot reach the
- * separate system picker activity without Espresso-Intents, not a dependency of this project) —
- * app-side encryption/decryption and repository wiring are exercised directly instead, using the
- * same FinanceRepository instance the UI dialog itself calls into.
+ * The existing UtilityBackupRestoreDeviceTest proves the repository/crypto round trip against
+ * fixture entities constructed directly, never through the app's own UI. This test registers a
+ * utility bill through the real Add Bill dialog (same path a user drives), backs up the live app
+ * database the UI just wrote to, deletes it to simulate loss, restores via the production
+ * LiveRestoreService, and confirms the exact UI-entered profile survives intact on disk.
+ *
+ * Rewritten against the utility-tracker shell — the prior version of this file drove the
+ * pre-reset Money screen's Add Account dialog, which no longer exists. The SAF file-picker chrome
+ * around "Create Encrypted Backup"/"Restore Encrypted Backup" is not driven here (Compose UI
+ * tests cannot reach the separate system picker activity without Espresso-Intents, not a
+ * dependency of this project) — app-side encryption/decryption and repository wiring are
+ * exercised directly instead, using the same FinanceRepository instance the UI dialog itself
+ * calls into.
  */
 @RunWith(AndroidJUnit4::class)
 class UiDrivenBackupRestoreDeviceTest {
@@ -55,27 +57,29 @@ class UiDrivenBackupRestoreDeviceTest {
     }
 
     @Test
-    fun uiEnteredAccountSurvivesBackupDeleteAndRestore() {
+    fun uiEnteredUtilityBillSurvivesBackupDeleteAndRestore() {
         unlockIfNeeded()
-        composeRule.onNodeWithText("Money", useUnmergedTree = true).performClick()
-        composeRule.onNodeWithTag("add-account", useUnmergedTree = true).performClick()
-        val accountName = "UiBackup ${UUID.randomUUID().toString().take(8)}"
-        composeRule.onNodeWithTag("account-name", useUnmergedTree = true).performTextInput(accountName)
-        composeRule.onNodeWithTag("account-amount", useUnmergedTree = true).performTextInput("77700")
+        composeRule.onNodeWithText("Bills", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("add-bill-fab", useUnmergedTree = true).performClick()
+        val billName = "UiBackup ${UUID.randomUUID().toString().take(8)}"
+        composeRule.onNodeWithTag("bill-name", useUnmergedTree = true).performTextInput(billName)
+        composeRule.onNodeWithTag("provider", useUnmergedTree = true).performTextInput("UiBackup Power Co")
+        composeRule.onNodeWithTag("reference-number", useUnmergedTree = true).performTextInput("UI-REF-${UUID.randomUUID().toString().take(6)}")
         composeRule.onNodeWithText("Save", useUnmergedTree = true).performClick()
 
         val application = composeRule.activity.applicationContext as PassportApplication
         val context = composeRule.activity.applicationContext
 
         runBlocking {
-            // Give the fire-and-forget insert (see MoneyCaptureDeviceTest) a moment to land before backing up.
+            // Give the fire-and-forget insert (see UtilityPaymentStatusDeviceTest) a moment to
+            // land before backing up.
             var attempts = 0
-            while (application.repository.database.accountDao().getAll().none { it.name == accountName } && attempts < 25) {
+            while (application.repository.database.utilityBillDao().getAll().none { it.name == billName } && attempts < 25) {
                 Thread.sleep(200)
                 attempts++
             }
-            check(application.repository.database.accountDao().getAll().any { it.name == accountName }) {
-                "UI-entered account never reached the repository"
+            check(application.repository.database.utilityBillDao().getAll().any { it.name == billName }) {
+                "UI-entered utility bill never reached the repository"
             }
 
             val payload = application.repository.createEncryptedBackup(context, "ui-backup-password".toCharArray())
@@ -89,16 +93,16 @@ class UiDrivenBackupRestoreDeviceTest {
             LiveRestoreService(context).restore(payload, "ui-backup-password".toCharArray())
 
             val raw = SQLiteDatabase.openDatabase(liveFile.path, null, SQLiteDatabase.OPEN_READONLY)
-            raw.rawQuery("SELECT name, openingBalanceMinor FROM accounts WHERE name = ?", arrayOf(accountName)).use { cursor ->
+            raw.rawQuery("SELECT name, provider FROM utility_bill_profiles WHERE name = ?", arrayOf(billName)).use { cursor ->
                 assertEquals(true, cursor.moveToFirst())
-                assertEquals(accountName, cursor.getString(0))
-                assertEquals(7_770_000L, cursor.getLong(1))
+                assertEquals(billName, cursor.getString(0))
+                assertEquals("UiBackup Power Co", cursor.getString(1))
             }
             raw.close()
 
             val reopened = Room.databaseBuilder(context, AppDatabase::class.java, "passport.db")
-                .addMigrations(DatabaseProvider.MIGRATION_4_5).build()
-            assertEquals(1, reopened.accountDao().getAll().count { it.name == accountName })
+                .addMigrations(*DatabaseProvider.ALL_MIGRATIONS).build()
+            assertEquals(1, reopened.utilityBillDao().getAll().count { it.name == billName })
             reopened.close()
         }
     }
@@ -106,6 +110,9 @@ class UiDrivenBackupRestoreDeviceTest {
     private fun dismissOnboardingIfPresent() {
         while (composeRule.onAllNodesWithTag("onboarding-next").fetchSemanticsNodes().isNotEmpty()) {
             composeRule.onNodeWithTag("onboarding-next").performClick()
+        }
+        if (composeRule.onAllNodesWithTag("setup-skip-pin").fetchSemanticsNodes().isNotEmpty()) {
+            composeRule.onNodeWithTag("setup-skip-pin").performClick()
         }
         if (composeRule.onAllNodesWithTag("setup-start-empty").fetchSemanticsNodes().isNotEmpty()) {
             composeRule.onNodeWithTag("setup-start-empty").performClick()

@@ -13,7 +13,6 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.rule.GrantPermissionRule
-import java.util.UUID
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -24,13 +23,15 @@ import org.junit.runners.model.Statement
 import pk.vexel.financepassport.MainActivity
 
 /**
- * Covers the guided-setup step added to onboarding (Sprint/phase item: guided account setup),
- * and confirms the welcome copy leads with the personal-finance-diary framing rather than
- * co-equal tax-capture language. Every androidTest class in a connectedAndroidTest run shares
- * one continuous app install (no reset between classes, per the existing Test Orchestrator
- * setup) — these tests are written to only assert onboarding-specific behavior and never assume
- * they are the very first test to touch the app process, matching the pattern used elsewhere in
- * this suite (see MoneyCaptureDeviceTest's own comment on this).
+ * Covers the current utility-tracker onboarding flow: two informational pages, an optional PIN
+ * step, and a "Get Started" page. Replaces a prior version of this file that tested a guided
+ * account-setup step (bank/cash/investment account, major asset) that no longer exists — that
+ * step belonged to the pre-reset full personal-finance app; onboarding is utility-only now.
+ *
+ * [skipPinReachesTheDashboardWithoutCreatingAPin] is a regression test for a real bug: skipping
+ * PIN setup here used to still leave the user unable to relaunch without being forced into PIN
+ * *creation* (SecurityGate relocked on every backgrounding regardless of whether a PIN existed,
+ * and its own lock screen has no skip option) — see SecurityGate.kt's ON_STOP fix.
  */
 @RunWith(AndroidJUnit4::class)
 class OnboardingDeviceTest {
@@ -45,83 +46,78 @@ class OnboardingDeviceTest {
     }
 
     @Test
-    fun welcomeCopyLeadsWithFinanceDiaryNotCoEqualTaxCapture() {
+    fun welcomeCopyDescribesAUtilityBillTracker() {
         skipIfOnboardingAlreadyComplete { return@skipIfOnboardingAlreadyComplete }
+        composeRule.onNodeWithText("Welcome to Vexel Finance Passport").assertIsDisplayed()
         composeRule.onNodeWithText(
-            "A private, offline-first personal finance diary: track daily expenses, bills, income, loans, receivables, savings and your overall net worth — all in one place, on this device. As a supporting benefit, it can also keep your records tax-ready automatically.",
+            "A private, offline-first monthly utility bill tracker.",
             substring = true,
         ).assertIsDisplayed()
-        assertTrue(
-            composeRule.onAllNodesWithText("accounts, wealth, documents and continuous tax capture", substring = true)
-                .fetchSemanticsNodes().isEmpty(),
-        )
     }
 
     @Test
-    fun startEmptyFinishesOnboardingWithNoAccountsOrAssetsCreated() {
+    fun skipPinReachesTheDashboardWithoutCreatingAPin() {
         skipIfOnboardingAlreadyComplete { return@skipIfOnboardingAlreadyComplete }
-        advanceToGuidedSetup()
+        advanceToPinStep()
+        composeRule.onNodeWithTag("setup-skip-pin").performClick()
+        composeRule.onNodeWithTag("setup-start-empty").assertIsDisplayed()
         composeRule.onNodeWithTag("setup-start-empty").performClick()
-        // Onboarding is complete: either PIN creation or the unlocked app shell is now shown,
-        // never the setup screen itself.
-        assertTrue(composeRule.onAllNodesWithTag("setup-start-empty").fetchSemanticsNodes().isEmpty())
-        finishSecurityGateIfPresent()
-        composeRule.onNodeWithText("Money", useUnmergedTree = true).performClick()
-        composeRule.onNodeWithText("Accounts", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Dashboard").assertIsDisplayed()
+
+        // No PIN was ever created, so a fresh SecurityGate composition (what a real relaunch
+        // produces) must not demand one. Activity#recreate() rebuilds the Compose hierarchy the
+        // same way rotation/process-death restoration does.
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        assertTrue(composeRule.onAllNodesWithText("Create PIN").fetchSemanticsNodes().isEmpty())
+        composeRule.onNodeWithText("Dashboard").assertIsDisplayed()
     }
 
     @Test
-    fun addBankAccountOptionPersistsARealAccount() {
+    fun creatingAPinDuringOnboardingRequiresItOnRelaunch() {
         skipIfOnboardingAlreadyComplete { return@skipIfOnboardingAlreadyComplete }
-        advanceToGuidedSetup()
-        composeRule.onNodeWithTag("setup-bank").performClick()
-        val accountName = "Onboarding Bank ${UUID.randomUUID().toString().take(8)}"
-        composeRule.onNodeWithTag("setup-name").performTextInput(accountName)
-        composeRule.onNodeWithTag("setup-amount").performTextInput("5000")
-        composeRule.onNodeWithTag("setup-save").performClick()
-        finishSecurityGateIfPresent()
-        composeRule.onNodeWithText("Money", useUnmergedTree = true).performClick()
-        composeRule.onNodeWithText(accountName, useUnmergedTree = true).assertIsDisplayed()
+        advanceToPinStep()
+        composeRule.onNodeWithTag("setup-pin").performTextInput("1234")
+        composeRule.onNodeWithTag("setup-confirm-pin").performTextInput("1234")
+        composeRule.onNodeWithTag("setup-create-pin").performClick()
+        composeRule.onNodeWithTag("setup-start-empty").performClick()
+        // A PIN now exists, so SecurityGate's `unlocked = !store.hasPin()` starts false the
+        // instant onboarding hands off to it — this first unlock uses the PIN just created.
+        composeRule.onNodeWithText("Unlock").assertIsDisplayed()
+        composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("1234")
+        composeRule.onNodeWithText("Unlock").performClick()
+        composeRule.onNodeWithText("Dashboard").assertIsDisplayed()
+
+        composeRule.activityRule.scenario.recreate()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Unlock").assertIsDisplayed()
+        composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("1234")
+        composeRule.onNodeWithText("Unlock").performClick()
+        composeRule.onNodeWithText("Dashboard").assertIsDisplayed()
     }
 
     @Test
-    fun backNavigationReturnsFromGuidedSetupToInfoPages() {
+    fun backNavigationReturnsFromPinStepToInfoPages() {
         skipIfOnboardingAlreadyComplete { return@skipIfOnboardingAlreadyComplete }
-        advanceToGuidedSetup()
-        composeRule.onAllNodesWithText("Back").let { nodes ->
-            if (nodes.fetchSemanticsNodes().isNotEmpty()) nodes[0].performClick()
-        }
+        advanceToPinStep()
+        composeRule.onAllNodesWithText("Back")[0].performClick()
         composeRule.onNodeWithTag("onboarding-title").assertIsDisplayed()
     }
 
-    /** Advances through the three informational pages by tapping onboarding-next each time. */
-    private fun advanceToGuidedSetup() {
+    /** Advances through the two informational pages by tapping onboarding-next each time. */
+    private fun advanceToPinStep() {
         var guard = 0
         while (composeRule.onAllNodesWithTag("onboarding-next").fetchSemanticsNodes().isNotEmpty() && guard < 10) {
             composeRule.onNodeWithTag("onboarding-next").performClick()
             guard += 1
         }
-    }
-
-    private fun finishSecurityGateIfPresent() {
-        if (composeRule.onAllNodesWithText("Create PIN").fetchSemanticsNodes().isNotEmpty()) {
-            val fields = composeRule.onAllNodes(hasSetTextAction())
-            fields[0].performTextInput("1234")
-            fields[1].performTextInput("1234")
-            composeRule.onNodeWithText("Create PIN").performClick()
-        } else if (composeRule.onAllNodesWithText("Unlock").fetchSemanticsNodes().isNotEmpty()) {
-            composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("1234")
-            composeRule.onNodeWithText("Unlock").performClick()
-        }
+        composeRule.onNodeWithTag("onboarding-pin-title").assertIsDisplayed()
     }
 
     /**
-     * Because androidTest classes share one app install in a full connectedAndroidTest run,
-     * onboarding may already be complete by the time this class runs if an earlier test class
-     * finished it first. These tests only exercise real onboarding behavior — if onboarding is
-     * already done, [onSkip] short-circuits the test rather than asserting against a screen that
-     * can no longer be reached (this class is still meaningful in isolation, e.g. `--tests
-     * "*Onboarding*"` against a fresh install, which is how it is expected to be run first).
+     * Test methods within this class share one app install; only the first method to run reaches
+     * real onboarding. Later methods short-circuit rather than asserting against a screen that
+     * has already completed.
      */
     private inline fun skipIfOnboardingAlreadyComplete(onSkip: () -> Unit) {
         if (composeRule.onAllNodesWithTag("onboarding-title").fetchSemanticsNodes().isEmpty()) {

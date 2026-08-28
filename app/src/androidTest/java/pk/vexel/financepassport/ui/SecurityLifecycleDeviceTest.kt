@@ -29,27 +29,22 @@ import org.junit.runners.model.Statement
 import pk.vexel.financepassport.MainActivity
 
 /**
- * Phase 10 device-lifecycle items that were never previously scoped into any pass:
- * inactivity relock, deleteAllData returning to onboarding without a process kill, and a
- * deliberate rotation/process-death proof for the Phase 8 rememberSaveable conversions (the
- * connected suite otherwise only exercises Activity teardown incidentally, between test classes).
+ * Device-lifecycle coverage: inactivity relock, deleteAllData returning to onboarding without a
+ * process kill, and a rotation/process-death proof that an in-flight Add Bill dialog's unsaved
+ * fields survive. Rewritten against the utility-tracker shell (Dashboard/Bills/Add Bill) — the
+ * prior version drove the pre-reset Money screen's Add Account dialog, which no longer exists.
  *
  * Deep-link lock enforcement (mega-prompt item) is not covered here: AndroidManifest.xml declares
  * exactly one intent-filter on MainActivity, category LAUNCHER only, no deep links of any kind
  * exist in this app to bypass the lock screen through. Confirmed by inspection, not a test against
  * nothing.
  *
- * Biometric cancel-does-not-unlock is also not covered here: both attached emulators
- * (Android_26_Test, Android_15_Test) declare android.hardware.fingerprint as a PackageManager
- * feature, but neither resolves an android.settings.FINGERPRINT_ENROLL intent (no Settings
- * fingerprint-enrollment activity present in these system images) and dumpsys biometric/
- * fingerprint report no enrolled biometric. BiometricManager#canAuthenticate therefore never
- * returns BIOMETRIC_SUCCESS on this hardware, so SecurityGate's "Use biometrics" button never
- * renders and BiometricPrompt's cancel path is unreachable in this environment. The app-side
- * code for that path (SecurityGate.kt) only overrides onAuthenticationSucceeded — there is no
- * onAuthenticationError/onAuthenticationFailed override, so the default AuthenticationCallback
- * no-ops on cancel/failure and `unlocked` simply stays false, which is the correct behavior; this
- * was confirmed by code inspection rather than a live BiometricPrompt interaction.
+ * Biometric cancel-does-not-unlock is also not covered here: attached emulators declare
+ * android.hardware.fingerprint as a PackageManager feature but have no enrolled biometric, so
+ * BiometricManager#canAuthenticate never returns BIOMETRIC_SUCCESS and SecurityGate's "Use
+ * biometrics" button never renders. SecurityGate.kt's AuthenticationCallback only overrides
+ * onAuthenticationSucceeded — there is no onAuthenticationError/onAuthenticationFailed override,
+ * so the default no-op-on-cancel behavior is correct; confirmed by code inspection.
  */
 @RunWith(AndroidJUnit4::class)
 class SecurityLifecycleDeviceTest {
@@ -64,29 +59,29 @@ class SecurityLifecycleDeviceTest {
     }
 
     @Test
-    fun backgroundingTheAppRelocksIt() {
+    fun backgroundingTheAppRelocksItWhenAPinIsSet() {
         unlockIfNeeded()
-        composeRule.onNodeWithText("Money", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Dashboard", useUnmergedTree = true).assertIsDisplayed()
 
         // ON_STOP (backgrounding without a process kill) flips SecurityGate's `unlocked` back to
-        // false; ON_RESUME afterward should show the PIN entry screen again, not the app content.
+        // false when a PIN exists; ON_RESUME afterward should show the PIN entry screen again.
         composeRule.activityRule.scenario.moveToState(Lifecycle.State.CREATED)
         composeRule.activityRule.scenario.moveToState(Lifecycle.State.RESUMED)
 
         composeRule.onNodeWithText("Unlock").assertIsDisplayed()
         composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("1234")
         composeRule.onNodeWithText("Unlock").performClick()
-        composeRule.onNodeWithText("Money", useUnmergedTree = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Dashboard", useUnmergedTree = true).assertIsDisplayed()
     }
 
     @Test
     fun deleteAllDataReturnsToOnboardingWithoutProcessKill() {
         unlockIfNeeded()
-        composeRule.onNodeWithContentDescription("More", useUnmergedTree = true).performClick()
-        waitFor("Reports and local data controls")
+        composeRule.onNodeWithContentDescription("Settings", useUnmergedTree = true).performClick()
+        waitFor("Offline local backup and data controls")
         composeRule.onNodeWithTag("more-dialog-scroll", useUnmergedTree = true)
-            .performScrollToNode(hasText("Delete all application data"))
-        composeRule.onNodeWithText("Delete all application data", useUnmergedTree = true).performClick()
+            .performScrollToNode(hasText("Delete All Application Data"))
+        composeRule.onNodeWithText("Delete All Application Data", useUnmergedTree = true).performClick()
         waitFor("Type DELETE to confirm")
         composeRule.onNodeWithTag("delete-confirmation", useUnmergedTree = true).performTextInput("DELETE")
         composeRule.onNodeWithText("Delete all", useUnmergedTree = true).performClick()
@@ -109,19 +104,20 @@ class SecurityLifecycleDeviceTest {
     }
 
     @Test
-    fun rotationPreservesInFlightAddAccountDialogFields() {
+    fun rotationPreservesInFlightAddBillDialogFields() {
         unlockIfNeeded()
-        composeRule.onNodeWithText("Money", useUnmergedTree = true).performClick()
-        composeRule.onNodeWithTag("add-account", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithText("Bills", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithTag("add-bill-fab", useUnmergedTree = true).performClick()
+        waitForTag("bill-name")
 
-        val accountName = "Rotation ${UUID.randomUUID().toString().take(8)}"
-        composeRule.onNodeWithTag("account-name", useUnmergedTree = true).performTextInput(accountName)
-        composeRule.onNodeWithTag("account-institution", useUnmergedTree = true).performTextInput("Rotation Bank")
+        val billName = "Rotation ${UUID.randomUUID().toString().take(8)}"
+        composeRule.onNodeWithTag("bill-name", useUnmergedTree = true).performTextInput(billName)
+        composeRule.onNodeWithTag("provider", useUnmergedTree = true).performTextInput("Rotation Utility Co")
 
-        // Deliberate rotation/process-death proof for the Phase 8 remember -> rememberSaveable
-        // conversion: Activity#recreate() tears down and rebuilds the whole Compose hierarchy the
-        // same way a real rotation or process death + restore does. The dialog's open state and
-        // its typed-but-unsaved field content must both survive underneath the security gate.
+        // Deliberate rotation/process-death proof: Activity#recreate() tears down and rebuilds the
+        // whole Compose hierarchy the same way a real rotation or process death + restore does.
+        // The dialog's open state and its typed-but-unsaved field content must both survive
+        // underneath the security gate.
         composeRule.activityRule.scenario.recreate()
         composeRule.waitForIdle()
 
@@ -131,9 +127,9 @@ class SecurityLifecycleDeviceTest {
         composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("1234")
         composeRule.onNodeWithText("Unlock").performClick()
 
-        waitFor(accountName)
-        composeRule.onNodeWithTag("account-name", useUnmergedTree = true).assert(hasText(accountName))
-        composeRule.onNodeWithTag("account-institution", useUnmergedTree = true).assert(hasText("Rotation Bank"))
+        waitFor(billName)
+        composeRule.onNodeWithTag("bill-name", useUnmergedTree = true).assert(hasText(billName))
+        composeRule.onNodeWithTag("provider", useUnmergedTree = true).assert(hasText("Rotation Utility Co"))
     }
 
     private fun waitFor(text: String, timeoutMillis: Long = 8_000) {
@@ -151,9 +147,15 @@ class SecurityLifecycleDeviceTest {
         throw AssertionError("Timed out waiting for '$text' to appear", lastError)
     }
 
-    private fun waitAndClick(text: String, timeoutMillis: Long = 8_000) {
-        waitFor(text, timeoutMillis)
-        composeRule.onNodeWithText(text, useUnmergedTree = true).performClick()
+    /** AlertDialog content can take a frame or two to attach after the state flip that opens it. */
+    private fun waitForTag(tag: String, timeoutMillis: Long = 8_000) {
+        val deadline = System.currentTimeMillis() + timeoutMillis
+        while (System.currentTimeMillis() < deadline) {
+            composeRule.waitForIdle()
+            if (composeRule.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()) return
+            Thread.sleep(200)
+        }
+        throw AssertionError("Timed out waiting for tag '$tag' to appear")
     }
 
     private fun dismissOnboardingIfPresent() {
@@ -165,6 +167,8 @@ class SecurityLifecycleDeviceTest {
         }
     }
 
+    /** These tests specifically need a PIN to exist (to exercise relock), so onboarding's PIN
+     * step is completed with a real PIN rather than skipped. */
     private fun unlockIfNeeded() {
         dismissOnboardingIfPresent()
         if (composeRule.onAllNodesWithText("Create PIN").fetchSemanticsNodes().isNotEmpty()) {
@@ -172,6 +176,15 @@ class SecurityLifecycleDeviceTest {
             fields[0].performTextInput("1234")
             fields[1].performTextInput("1234")
             composeRule.onNodeWithText("Create PIN").performClick()
+            if (composeRule.onAllNodesWithTag("setup-start-empty").fetchSemanticsNodes().isNotEmpty()) {
+                composeRule.onNodeWithTag("setup-start-empty").performClick()
+            }
+            // A PIN now exists, so SecurityGate's `unlocked = !store.hasPin()` starts false the
+            // instant onboarding hands off to it — this first unlock uses the PIN just created.
+            if (composeRule.onAllNodesWithText("Unlock").fetchSemanticsNodes().isNotEmpty()) {
+                composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("1234")
+                composeRule.onNodeWithText("Unlock").performClick()
+            }
         } else if (composeRule.onAllNodesWithText("Unlock").fetchSemanticsNodes().isNotEmpty()) {
             composeRule.onAllNodes(hasSetTextAction())[0].performTextInput("1234")
             composeRule.onNodeWithText("Unlock").performClick()
