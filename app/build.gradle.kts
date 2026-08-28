@@ -28,8 +28,8 @@ android {
         applicationId = "pk.vexel.financepassport"
         minSdk = 26
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.0.3"
+        versionCode = 4
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Each androidTest class otherwise shares one continuous app process/database for the
