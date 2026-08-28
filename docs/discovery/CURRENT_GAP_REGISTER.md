@@ -29,6 +29,26 @@ Observed gaps only; this is not an implementation roadmap.
 | G-023 | Functional gap | Settings onboarding copy says PIN can be set later, but current Settings dialog has no PIN setup/change action | `Onboarding.kt`, `MoreDialog` |
 | G-024 | Possible defect | Utility reconciliation includes archived months through the archive month based on `updatedAt`; archive timing semantics are implicit | `UtilityRecurrenceEngine.reconcileProfile` |
 
+## Sprint 24 disposition (2026-08-28)
+
+Historical observations above are retained. Implementation evidence is in
+`docs/sprints/SPRINT_24_FINANCE_RECONNECTION.md`.
+
+| Finding | Disposition |
+| --- | --- |
+| G-002, G-003 | Addressed in code by atomic PaymentRecord -> FinancialEvent -> Account linkage; device qualification blocked |
+| G-004, G-005 | Addressed in code by typed attachment metadata and explicit profile/occurrence/payment file+metadata cleanup |
+| G-006 | Addressed by canonical taxonomy with legacy mapping |
+| G-007 | Partially addressed as intended: Money restored; deferred modules remain hidden |
+| G-013 | Addressed: JDK 17 host build/test/lint pass |
+| G-014 | Still open for live runtime because API 36 AVD could not boot without KVM |
+| G-015 | Addressed with activity-level FLAG_SECURE |
+| G-020 | Addressed in release ledger for versionName 1.1.0/versionCode 4 |
+| G-023 | Addressed with Settings PIN setup/change/remove and current-PIN verification |
+
+G-001 remains a non-gap by product decision: no Reset Utility feature should exist. All other
+findings remain unchanged or are explicitly deferred from Sprint 24.
+
 ## Security/privacy classification summary
 
 | Control | Status | Finding |
@@ -48,4 +68,3 @@ Observed gaps only; this is not an implementation roadmap.
 | Analytics/ads/network SDKs | NOT FOUND | no dependencies/usages found |
 | Sensitive logging | NOT FOUND | no production Log/println calls found |
 | Committed secrets | NOT FOUND by source/config scan | signing properties/key are described as ignored; no secret value inspected |
-

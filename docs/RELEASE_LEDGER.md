@@ -9,6 +9,28 @@ uploaded; see `docs/RELEASE_SIGNING.md` for the signing key identity itself.
 
 ---
 
+## v1.1.0 (versionCode 4) — 2026-08-28 Sprint 24 local build
+
+**Track:** Not published; local implementation/verification artifact only
+
+**Commit:** `aa3632752063a24edafa18f7d98fdfcce4b3c3e0`
+**Scope:** Money navigation, canonical account/activity UI, utility-payment unified-ledger bridge,
+Room v14 migration, attachment lifecycle, PIN management and screenshot protection.
+
+**Artifacts:**
+
+| File | SHA-256 |
+| --- | --- |
+| `app-debug.apk` | `85e33379204b5e2c308f7c47664418ec682d7aec67d4600803ee2235f36724a7` |
+| local `app-release.apk` | `38b80cac0b7032dc88e254d559a12b9c76895d88766572fc31a0b8730099104e` |
+
+**Verification:** Host `test`, `lint`, `assembleDebug`, `assembleDebugAndroidTest`, and
+`assembleRelease` passed. Connected/API 36 qualification is BLOCKED by the current host's missing
+KVM support and non-completing TCG boot; this artifact is not approved for Play publication. See
+`docs/verification/SPRINT_24_GATE.md`.
+
+---
+
 ## v1.0.3 (versionCode 3) — 2026-08-24
 
 **Track:** Closed testing (pending upload)
