@@ -88,7 +88,7 @@ class FinanceRepository(private val db: AppDatabase) {
     }
 
     suspend fun updateMonthlyOccurrence(occurrence: MonthlyBillOccurrenceEntity) {
-        db.monthlyBillOccurrenceDao().upsert(occurrence)
+        db.monthlyBillOccurrenceDao().update(occurrence)
     }
 
     suspend fun deleteMonthlyOccurrence(id: String) {
@@ -625,9 +625,17 @@ class FinanceRepository(private val db: AppDatabase) {
         val documents = allDocuments.map { document ->
             BackupFile("documents/${File(document.localEncryptedPath).name}", File(document.localEncryptedPath).readBytes())
         }
-        val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size + db.incomeSourceDao().getAll().size
+        // Utility bill/payment attachments live in a separate on-disk vault (utility_vault/) from
+        // the legacy document vault, so they need their own bundled entries — otherwise the
+        // database snapshot restores bill_attachments rows whose storagePath points at files that
+        // were never included in the backup at all.
+        val utilityAttachments = db.billAttachmentDao().getAll()
+        val utilityDocuments = utilityAttachments.map { attachment ->
+            BackupFile("documents/utility/${File(attachment.storagePath).name}", File(attachment.storagePath).readBytes())
+        }
+        val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size + db.incomeSourceDao().getAll().size + db.utilityBillDao().getAll().size + db.monthlyBillOccurrenceDao().getAll().size + db.paymentRecordDao().getAll().size + utilityAttachments.size
         return try {
-            BackupPackageService().create(snapshotFile.readBytes(), documents, BuildConfig.VERSION_NAME, DATABASE_VERSION, password, recordCount, allDocuments.map { it.sha256 }, runCatching { pk.vexel.financepassport.core.taxrules.BundledTaxRulesets.loadDefault().version }.getOrNull()).payload
+            BackupPackageService().create(snapshotFile.readBytes(), documents + utilityDocuments, BuildConfig.VERSION_NAME, DATABASE_VERSION, password, recordCount, allDocuments.map { it.sha256 }, runCatching { pk.vexel.financepassport.core.taxrules.BundledTaxRulesets.loadDefault().version }.getOrNull()).payload
         } finally {
             snapshotFile.delete()
         }
@@ -649,8 +657,12 @@ class FinanceRepository(private val db: AppDatabase) {
             val documents = db.documentDao().getAll().map { document ->
                 BackupDiskFile("documents/${File(document.localEncryptedPath).name}", File(document.localEncryptedPath))
             }
-            val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size + db.incomeSourceDao().getAll().size
-            BackupPackageService().createStreaming(snapshotFile, documents, BuildConfig.VERSION_NAME, DATABASE_VERSION, password, recordCount, output)
+            val utilityAttachments = db.billAttachmentDao().getAll()
+            val utilityDocuments = utilityAttachments.map { attachment ->
+                BackupDiskFile("documents/utility/${File(attachment.storagePath).name}", File(attachment.storagePath))
+            }
+            val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size + db.incomeSourceDao().getAll().size + db.utilityBillDao().getAll().size + db.monthlyBillOccurrenceDao().getAll().size + db.paymentRecordDao().getAll().size + utilityAttachments.size
+            BackupPackageService().createStreaming(snapshotFile, documents + utilityDocuments, BuildConfig.VERSION_NAME, DATABASE_VERSION, password, recordCount, output)
             return output
         } catch (failure: Throwable) {
             output.delete()

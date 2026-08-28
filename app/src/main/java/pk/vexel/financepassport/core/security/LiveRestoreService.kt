@@ -27,7 +27,14 @@ class LiveRestoreService(private val context: Context, private val packageServic
             validateDatabase(live)
             val vault = File(context.filesDir, "vault").apply { mkdirs() }
             File(staging, "documents").listFiles()?.forEach { staged ->
-                Files.copy(staged.toPath(), File(vault, staged.name).toPath(), StandardCopyOption.REPLACE_EXISTING)
+                if (staged.isFile) Files.copy(staged.toPath(), File(vault, staged.name).toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+            // Utility bill/payment attachments are bundled under documents/utility/ (see
+            // FinanceRepository.createEncryptedBackup{,File}) and restore into their own vault
+            // directory, matching where UtilityAttachmentVault stores them at capture time.
+            val utilityVault = File(context.filesDir, "utility_vault").apply { mkdirs() }
+            File(staging, "documents/utility").listFiles()?.forEach { staged ->
+                if (staged.isFile) Files.copy(staged.toPath(), File(utilityVault, staged.name).toPath(), StandardCopyOption.REPLACE_EXISTING)
             }
             return manifest
         } catch (failure: Throwable) {

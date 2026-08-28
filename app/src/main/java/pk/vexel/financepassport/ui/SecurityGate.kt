@@ -42,7 +42,11 @@ fun SecurityGate(content: @Composable () -> Unit) {
     var unlocked by remember { mutableStateOf(!store.hasPin()) }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, unlocked) {
-        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) unlocked = false }
+        // Relocking on backgrounding only makes sense when a PIN actually exists to unlock with.
+        // Without this check, a user who chose "Skip PIN" gets dropped into PinScreen's PIN
+        // *creation* flow (setup = !store.hasPin()) on every relaunch, with no way back into the
+        // app short of setting a PIN they explicitly declined — silently reversing that choice.
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP && store.hasPin()) unlocked = false }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }

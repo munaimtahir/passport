@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -424,6 +425,14 @@ interface MonthlyBillOccurrenceDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(occurrence: MonthlyBillOccurrenceEntity)
+
+    // @Update issues a plain UPDATE statement. Unlike upsert() (INSERT OR REPLACE, which SQLite
+    // implements as DELETE-then-INSERT), it never deletes the row, so it cannot cascade-delete
+    // the occurrence's payment_records/bill_attachments children via their ON DELETE CASCADE
+    // foreign keys. Always use this for editing an occurrence that may already have a payment
+    // recorded against it; reserve upsert() for creating occurrences that don't exist yet.
+    @Update
+    suspend fun update(occurrence: MonthlyBillOccurrenceEntity)
 
     @Query("DELETE FROM monthly_bill_occurrences WHERE id = :id")
     suspend fun delete(id: String)

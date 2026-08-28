@@ -130,7 +130,7 @@ object UtilityRecurrenceEngine {
             )
 
             if (occ.status != correctStatus) {
-                db.monthlyBillOccurrenceDao().upsert(
+                db.monthlyBillOccurrenceDao().update(
                     occ.copy(
                         status = correctStatus,
                         updatedAtEpochMillis = System.currentTimeMillis()
