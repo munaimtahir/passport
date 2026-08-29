@@ -5,6 +5,8 @@ Verdict: **PARTIALLY VERIFIED — connected emulator suite has unresolved failur
 
 The SDK emulator was subsequently started. The physical Vivo device was intentionally excluded from all Gradle runs with `ANDROID_SERIAL=emulator-5554`.
 
+The API 26 AVD was then factory-reset with `-wipe-data` and booted as a brand-new emulator. The failed E2E method was rerun alone from that clean state and reproduced the bill-create failure.
+
 ## Device establishment
 
 Commands executed:
@@ -37,6 +39,7 @@ Results:
 - `ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest` on API 36: 61 passed, 7 failed, 0 skipped; System UI became non-responsive.
 - The same command on API 35: 60 passed, 8 failed, 0 skipped; System UI also became non-responsive.
 - The same command on API 26: 61 passed, 7 failed, 0 skipped. The first isolated failure, `ManualE2EWalkthroughDeviceTest`, reproduced from clean state while waiting for the newly created bill; later UI failures cascaded from that state. API 35 also had `UtilityBackupRestoreDeviceTest` fail with `expected Paid but was Due soon`.
+- Factory-reset targeted command: `ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=pk.vexel.financepassport.ui.ManualE2EWalkthroughDeviceTest#fullSessionFromOnboardingThroughPayingABillAndBackupSettings`; result: 1 executed, 0 passed, 1 failed. The failure remains `Timed out waiting for 'E2E Electric <uuid>' to appear` after the bill save action.
 
 ## Acceptance gates
 
