@@ -8,6 +8,7 @@ import java.util.Currency
 value class MinorUnits(val value: Long)
 
 data class Money(val minorUnits: MinorUnits, val currency: String = "PKR") {
+    val minorValue: Long get() = minorUnits.value
     init { require(currency.length == 3) { "Currency must be an ISO 4217 code" } }
 
     operator fun plus(other: Money): Money {

@@ -137,6 +137,7 @@ class FinanceRepository(private val db: AppDatabase) {
                     amountMinor = payment.amountPaidMinor,
                     currency = "PKR",
                     accountId = accountId,
+                    contextId = payment.contextId ?: profile.defaultContextId,
                     category = "Utilities",
                     description = "${profile.name} — $month",
                     notes = "Utility: ${profile.name}; Category: $category; Billing period: $month; Payment: ${payment.id}; Occurrence: ${occurrence.id}",
@@ -167,7 +168,22 @@ class FinanceRepository(private val db: AppDatabase) {
                 val profile = db.utilityBillDao().getById(occurrence.profileId) ?: error("Utility profile not found")
                 val month = java.time.YearMonth.of(occurrence.billingYear, occurrence.billingMonth)
                     .format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))
-                FinancialEventEntity(eventId, FinancialEventType.EXPENSE.name, paymentDate, amountPaid, "PKR", accountId, "Utilities", "${profile.name} — $month", "Utility: ${profile.name}; Category: ${UtilityCategory.canonicalLabel(profile.category)}; Billing period: $month; Payment: ${payment.id}; Occurrence: ${occurrence.id}", "UNKNOWN", null, updatedAt, updatedAt)
+                FinancialEventEntity(
+                    id = eventId,
+                    eventType = FinancialEventType.EXPENSE.name,
+                    dateEpochDay = paymentDate,
+                    amountMinor = amountPaid,
+                    currency = "PKR",
+                    accountId = accountId,
+                    contextId = payment.contextId ?: profile.defaultContextId,
+                    category = "Utilities",
+                    description = "${profile.name} — $month",
+                    notes = "Utility: ${profile.name}; Category: ${UtilityCategory.canonicalLabel(profile.category)}; Billing period: $month; Payment: ${payment.id}; Occurrence: ${occurrence.id}",
+                    taxRelevance = "UNKNOWN",
+                    deletedAtEpochMillis = null,
+                    createdAtEpochMillis = updatedAt,
+                    updatedAtEpochMillis = updatedAt
+                )
             }
             db.paymentRecordDao().update(payment.copy(amountPaidMinor = amountPaid, paymentDateEpochDay = paymentDate, paymentMode = mode, accountId = accountId, financialEventId = eventId, bankName = bank, transactionReference = reference, notes = notes, updatedAtEpochMillis = updatedAt))
             db.financialEventDao().upsert(event.copy(amountMinor = amountPaid, dateEpochDay = paymentDate, accountId = accountId, updatedAtEpochMillis = updatedAt))
@@ -472,7 +488,7 @@ class FinanceRepository(private val db: AppDatabase) {
         require(db.accountDao().getById(accountId)?.status == "ACTIVE") { "Choose an active account" }
         val now = Instant.now().toEpochMilli()
         val eventId = UUID.randomUUID().toString()
-        val event = FinancialEventEntity(eventId, type.name, date.toEpochDay(), amountMinor, "PKR", accountId, category?.trim()?.takeIf { it.isNotEmpty() }, description.trim(), null, taxRelevance, null, now, now, incomeSourceId.takeIf { type == FinancialEventType.INCOME })
+        val event = FinancialEventEntity(eventId, type.name, date.toEpochDay(), amountMinor, "PKR", accountId, null, category?.trim()?.takeIf { it.isNotEmpty() }, description.trim(), null, taxRelevance, null, now, now, incomeSourceId.takeIf { type == FinancialEventType.INCOME })
         db.withTransaction {
             db.financialEventDao().upsert(event)
             if (type == FinancialEventType.INCOME) {
@@ -549,15 +565,15 @@ class FinanceRepository(private val db: AppDatabase) {
         require(db.accountDao().getById(destinationAccountId)?.status == "ACTIVE") { "Choose an active destination account" }
         val now = Instant.now().toEpochMilli()
         val group = UUID.randomUUID().toString()
-        val out = FinancialEventEntity(UUID.randomUUID().toString(), "TRANSFER", date.toEpochDay(), -amountMinor, "PKR", sourceAccountId, null, description.trim(), null, "NOT_RELEVANT", null, now, now)
-        val incoming = FinancialEventEntity(UUID.randomUUID().toString(), "TRANSFER", date.toEpochDay(), amountMinor, "PKR", destinationAccountId, null, description.trim(), null, "NOT_RELEVANT", null, now, now)
+        val out = FinancialEventEntity(UUID.randomUUID().toString(), "TRANSFER", date.toEpochDay(), -amountMinor, "PKR", sourceAccountId, null, null, description.trim(), null, "NOT_RELEVANT", null, now, now)
+        val incoming = FinancialEventEntity(UUID.randomUUID().toString(), "TRANSFER", date.toEpochDay(), amountMinor, "PKR", destinationAccountId, null, null, description.trim(), null, "NOT_RELEVANT", null, now, now)
         db.withTransaction {
             db.financialEventDao().insertAll(listOf(out, incoming))
             db.transferLinkDao().insert(TransferLinkEntity(UUID.randomUUID().toString(), out.id, incoming.id, group))
         }
     }
 
-    fun toDomain(entity: FinancialEventEntity) = FinancialEvent(entity.id, runCatching { FinancialEventType.valueOf(entity.eventType) }.getOrDefault(FinancialEventType.ADJUSTMENT), Money(MinorUnits(kotlin.math.abs(entity.amountMinor)), entity.currency), entity.accountId, entity.dateEpochDay, entity.description)
+    fun toDomain(entity: FinancialEventEntity) = FinancialEvent(entity.id, runCatching { FinancialEventType.valueOf(entity.eventType) }.getOrDefault(FinancialEventType.ADJUSTMENT), Money(MinorUnits(kotlin.math.abs(entity.amountMinor)), entity.currency), entity.accountId, entity.contextId, entity.dateEpochDay, entity.description)
 
     suspend fun exportSnapshot() = ExportSnapshot(
         db.accountDao().getAll(), db.financialEventDao().getAll(), db.wealthDao().getAllAssets(), db.wealthDao().getAllLiabilities(),
@@ -733,7 +749,7 @@ class FinanceRepository(private val db: AppDatabase) {
         val utilityDocuments = utilityAttachments.map { attachment ->
             BackupFile("documents/utility/${File(attachment.storagePath).name}", File(attachment.storagePath).readBytes())
         }
-        val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size + db.incomeSourceDao().getAll().size + db.utilityBillDao().getAll().size + db.monthlyBillOccurrenceDao().getAll().size + db.paymentRecordDao().getAll().size + utilityAttachments.size
+        val recordCount = db.financialContextDao().getAll().size + db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size + db.incomeSourceDao().getAll().size + db.utilityBillDao().getAll().size + db.monthlyBillOccurrenceDao().getAll().size + db.paymentRecordDao().getAll().size + utilityAttachments.size
         return try {
             BackupPackageService().create(snapshotFile.readBytes(), documents + utilityDocuments, BuildConfig.VERSION_NAME, DATABASE_VERSION, password, recordCount, allDocuments.map { it.sha256 }, runCatching { pk.vexel.financepassport.core.taxrules.BundledTaxRulesets.loadDefault().version }.getOrNull()).payload
         } finally {
@@ -761,7 +777,7 @@ class FinanceRepository(private val db: AppDatabase) {
             val utilityDocuments = utilityAttachments.map { attachment ->
                 BackupDiskFile("documents/utility/${File(attachment.storagePath).name}", File(attachment.storagePath))
             }
-            val recordCount = db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size + db.incomeSourceDao().getAll().size + db.utilityBillDao().getAll().size + db.monthlyBillOccurrenceDao().getAll().size + db.paymentRecordDao().getAll().size + utilityAttachments.size
+            val recordCount = db.financialContextDao().getAll().size + db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size + db.incomeSourceDao().getAll().size + db.utilityBillDao().getAll().size + db.monthlyBillOccurrenceDao().getAll().size + db.paymentRecordDao().getAll().size + utilityAttachments.size
             BackupPackageService().createStreaming(snapshotFile, documents + utilityDocuments, BuildConfig.VERSION_NAME, DATABASE_VERSION, password, recordCount, output)
             return output
         } catch (failure: Throwable) {
@@ -938,4 +954,55 @@ class FinanceRepository(private val db: AppDatabase) {
         UtilityRecurrenceEngine.reconcileAll(db, java.time.LocalDate.now())
         scheduleUtilityReminders(context)
     }
+    suspend fun addAdjustment(accountId: String, amountMinor: Long, description: String) {
+        require(db.accountDao().getById(accountId)?.status == "ACTIVE") { "Choose an active account" }
+        val now = Instant.now().toEpochMilli()
+        val eventId = UUID.randomUUID().toString()
+        val event = FinancialEventEntity(eventId, FinancialEventType.ADJUSTMENT.name, LocalDate.now().toEpochDay(), amountMinor, "PKR", accountId, null, null, description.trim(), null, "UNKNOWN", null, now, now, null)
+        db.financialEventDao().upsert(event)
+    }
+
+    val financialContexts: kotlinx.coroutines.flow.Flow<List<pk.vexel.financepassport.core.database.FinancialContextEntity>> = db.financialContextDao().observeActive()
+    
+    val unassignedEvents: kotlinx.coroutines.flow.Flow<List<pk.vexel.financepassport.core.database.FinancialEventEntity>> = db.financialEventDao().observeActive().map { list ->
+        list.filter { it.accountId == null || it.contextId == null }
+    }
+    
+    fun observeTotalsInRange(start: Long, end: Long): kotlinx.coroutines.flow.Flow<Pair<pk.vexel.financepassport.core.model.Money, pk.vexel.financepassport.core.model.Money>> = kotlinx.coroutines.flow.combine(
+        db.financialEventDao().observeIncomeMinorInRange(start, end),
+        db.financialEventDao().observeExpenseMinorInRange(start, end)
+    ) { income, expense ->
+        pk.vexel.financepassport.core.model.Money(pk.vexel.financepassport.core.model.MinorUnits(income), "PKR") to pk.vexel.financepassport.core.model.Money(pk.vexel.financepassport.core.model.MinorUnits(expense), "PKR")
+    }
+
+    suspend fun upsertFinancialContext(id: String, domain: String, name: String) {
+        val now = Instant.now().toEpochMilli()
+        db.withTransaction {
+            val existing = db.financialContextDao().getById(id)
+            if (existing != null) {
+                db.financialContextDao().upsert(existing.copy(domain = domain, name = name, updatedAtEpochMillis = now))
+            } else {
+                db.financialContextDao().upsert(pk.vexel.financepassport.core.database.FinancialContextEntity(id, domain, name, "ACTIVE", now, now))
+            }
+        }
+    }
+    
+    suspend fun assignContext(eventId: String, contextId: String?) {
+        val now = Instant.now().toEpochMilli()
+        db.withTransaction {
+            db.financialEventDao().getById(eventId)?.let {
+                db.financialEventDao().upsert(it.copy(contextId = contextId, updatedAtEpochMillis = now))
+            }
+        }
+    }
+
+    suspend fun assignAccount(eventId: String, accountId: String?) {
+        val now = Instant.now().toEpochMilli()
+        db.withTransaction {
+            db.financialEventDao().getById(eventId)?.let {
+                db.financialEventDao().upsert(it.copy(accountId = accountId, updatedAtEpochMillis = now))
+            }
+        }
+    }
 }
+

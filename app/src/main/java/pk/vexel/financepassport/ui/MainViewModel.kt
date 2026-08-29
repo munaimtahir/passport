@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import pk.vexel.financepassport.core.database.AccountEntity
+import pk.vexel.financepassport.core.database.FinancialContextEntity
 import pk.vexel.financepassport.core.database.FinanceRepository
 import pk.vexel.financepassport.core.database.FinancialEventEntity
 import pk.vexel.financepassport.core.database.UtilityBillProfileEntity
@@ -182,9 +183,15 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     val accounts = repository.accounts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val activeAccounts = repository.activeAccounts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val incomeSources = repository.incomeSources.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val financialContexts = repository.financialContexts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList<pk.vexel.financepassport.core.database.FinancialContextEntity>())
+    val unassignedEvents = repository.unassignedEvents.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList<pk.vexel.financepassport.core.database.FinancialEventEntity>())
+
     val recentEvents = repository.recentEvents.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val activeEventCount = repository.activeEventCount.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
-    val totals = repository.totals.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+    private val thisMonthRange = java.time.YearMonth.now().let { Pair(it.atDay(1).toEpochDay(), it.atEndOfMonth().toEpochDay()) }
+    val thisMonthTotals = repository.observeTotalsInRange(thisMonthRange.first, thisMonthRange.second).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Pair(pk.vexel.financepassport.core.model.Money(pk.vexel.financepassport.core.model.MinorUnits(0), "PKR"), pk.vexel.financepassport.core.model.Money(pk.vexel.financepassport.core.model.MinorUnits(0), "PKR")))
+
+    val totals = repository.totals.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), Pair(pk.vexel.financepassport.core.model.Money(pk.vexel.financepassport.core.model.MinorUnits(0), "PKR"), pk.vexel.financepassport.core.model.Money(pk.vexel.financepassport.core.model.MinorUnits(0), "PKR")))
     val taxItems = repository.taxItems.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val assets = repository.assets.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val liabilities = repository.liabilities.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -225,6 +232,8 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     fun updateAccount(id: String, name: String, type: String, openingBalanceMinor: Long, institution: String? = null, notes: String? = null, context: String? = null) = write { repository.updateAccount(id, name, openingBalanceMinor, institution, notes, type, context) }
     fun archiveAccount(id: String) = write { repository.archiveAccount(id) }
     fun reactivateAccount(id: String) = write { repository.reactivateAccount(id) }
+    fun addAdjustment(accountId: String, amountMinor: Long, description: String) = write { repository.addAdjustment(accountId, amountMinor, description) }
+
     fun addEvent(type: FinancialEventType, amountMinor: Long, accountId: String, description: String, category: String? = null, date: LocalDate = LocalDate.now(), incomeSourceId: String? = null) = write { repository.addEvent(type, amountMinor, accountId, description, category, date = date, incomeSourceId = incomeSourceId) }
     fun addIncomeSource(name: String, sourceType: String, payerOrEmployer: String? = null) = write { repository.addIncomeSource(name, sourceType, payerOrEmployer) }
     fun addRecurringItem(context: android.content.Context, title: String, type: FinancialEventType, amountMinor: Long, accountId: String, category: String?, frequency: String, delayDays: Long) = write { repository.addRecurringItem(context, title, type, amountMinor, accountId, category, frequency, delayDays) }

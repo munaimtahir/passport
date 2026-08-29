@@ -215,4 +215,35 @@ class DatabaseMigrationTest {
             }
         }
     }
+
+    @Test
+    fun migrateV14ToV15AddsContextsAndBillDefaults() {
+        helper.createDatabase("migration-v14-pay", 14).apply { execSQL("INSERT INTO payment_records (id, occurrenceId, amountPaidMinor, paymentDateEpochDay, paymentMode, createdAtEpochMillis, updatedAtEpochMillis) VALUES (pr1, occ1, 100, 1, Cash, 1, 1)"); close() }
+        helper.runMigrationsAndValidate("migration-v14-pay", 15, true, DatabaseProvider.MIGRATION_14_15).close()
+        helper.createDatabase("migration-v14", 14).apply {
+            execSQL("INSERT INTO user_profiles (id, displayName, baseCurrency, createdAtEpochMillis, updatedAtEpochMillis) VALUES ('user', 'Demo', 'PKR', 1, 1)")
+            execSQL("INSERT INTO financial_events (id, eventType, dateEpochDay, amountMinor, currency, description, taxRelevance, createdAtEpochMillis, updatedAtEpochMillis) VALUES ('fe1', 'INCOME', 1, 1000, 'PKR', 'Desc', 'UNKNOWN', 1, 1)")
+            execSQL("INSERT INTO utility_bill_profiles (id, name, category, referenceNumber, issueDayAnchor, dueDayAnchor, recurrenceStartMonth, status, createdAtEpochMillis, updatedAtEpochMillis) VALUES ('ub1', 'K-Electric', 'Electricity', 'REF123', 1, 10, '2024-01', 'ACTIVE', 1, 1)")
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(
+            "migration-v14",
+            15,
+            true,
+            DatabaseProvider.MIGRATION_14_15,
+        )
+
+        val cursor = db.query("SELECT contextId FROM financial_events WHERE id = 'fe1'")
+        cursor.moveToFirst()
+        assert(cursor.isNull(0))
+        cursor.close()
+
+        val billCursor = db.query("SELECT defaultAccountId, defaultContextId, defaultExpenseCategory FROM utility_bill_profiles WHERE id = 'ub1'")
+        billCursor.moveToFirst()
+        assert(billCursor.isNull(0))
+        assert(billCursor.isNull(1))
+        assert(billCursor.isNull(2))
+        billCursor.close()
+    }
 }

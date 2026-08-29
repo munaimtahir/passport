@@ -7,12 +7,13 @@ import androidx.room.RoomDatabase
 // manifest's schemaVersion is written (FinanceRepository) so the two can never drift apart again —
 // this project has already hit that exact bug twice (the 8->9 and 9->10 boundaries), both times
 // from a hardcoded literal at the manifest call site.
-const val DATABASE_VERSION = 14
+const val DATABASE_VERSION = 15
 
 @Database(
     entities = [
         UserProfileEntity::class,
         AccountEntity::class,
+        FinancialContextEntity::class,
         FinancialEventEntity::class,
         AssetEntity::class,
         LiabilityEntity::class,
@@ -45,6 +46,7 @@ const val DATABASE_VERSION = 14
     exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
+    abstract fun financialContextDao(): FinancialContextDao
     abstract fun accountDao(): AccountDao
     abstract fun incomeSourceDao(): IncomeSourceDao
     abstract fun financialEventDao(): FinancialEventDao

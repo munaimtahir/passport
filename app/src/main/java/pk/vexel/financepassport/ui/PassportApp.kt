@@ -473,6 +473,10 @@ private fun HomeScreen(
     val activeAccounts by vm.activeAccounts.collectAsState()
     val recentEvents by vm.recentEvents.collectAsState()
     val isMasked = LocalPrivacyMode.current
+    val thisMonthTotals by vm.thisMonthTotals.collectAsState()
+    val unassignedEvents by vm.unassignedEvents.collectAsState()
+    val financialContexts by vm.financialContexts.collectAsState()
+
 
     var quickEvent by rememberSaveable { mutableStateOf<Boolean?>(null) }
     var quickBill by rememberSaveable { mutableStateOf(false) }
@@ -701,6 +705,10 @@ private fun MoneyScreen(vm: MainViewModel, application: PassportApplication, pad
     val recentEvents by vm.recentEvents.collectAsState()
     val recurringItems by vm.recurringItems.collectAsState()
     val isMasked = LocalPrivacyMode.current
+    val thisMonthTotals by vm.thisMonthTotals.collectAsState()
+    val unassignedEvents by vm.unassignedEvents.collectAsState()
+    val financialContexts by vm.financialContexts.collectAsState()
+
 
     var showEvent by rememberSaveable { mutableStateOf<Boolean?>(null) }
     var showTransfer by rememberSaveable { mutableStateOf(false) }
@@ -717,6 +725,37 @@ private fun MoneyScreen(vm: MainViewModel, application: PassportApplication, pad
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         item { Text("Money & Accounts", style = MaterialTheme.typography.headlineMedium) }
+        if (unassignedEvents.isNotEmpty()) {
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Unassigned Reconciliation", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onErrorContainer)
+                        Text("${unassignedEvents.size} events require account or context assignment.", color = MaterialTheme.colorScheme.onErrorContainer)
+                    }
+                }
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween) {
+                Column {
+                    Text("Income (This Month)", style = MaterialTheme.typography.labelMedium)
+                    Text(pk.vexel.financepassport.core.model.PkrMoneyInput.formatMinorUnits(thisMonthTotals?.first?.minorValue ?: 0), style = MaterialTheme.typography.titleLarge)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("Expenses (This Month)", style = MaterialTheme.typography.labelMedium)
+                    Text(pk.vexel.financepassport.core.model.PkrMoneyInput.formatMinorUnits(thisMonthTotals?.second?.minorValue ?: 0), style = MaterialTheme.typography.titleLarge)
+                }
+            }
+        }
+        item {
+            Row(Modifier.horizontalScroll(rememberScrollState()), Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = true, onClick = {}, label = { Text("All") })
+                financialContexts.forEach { ctx ->
+                    FilterChip(selected = false, onClick = {}, label = { Text(ctx.name) })
+                }
+            }
+        }
+
 
         item {
             Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
@@ -792,6 +831,10 @@ private fun BillsScreen(vm: MainViewModel, application: PassportApplication, pad
     val profiles by vm.utilityProfiles.collectAsState(initial = emptyList())
     val occurrences by vm.monthlyOccurrences.collectAsState(initial = emptyList())
     val isMasked = LocalPrivacyMode.current
+    val thisMonthTotals by vm.thisMonthTotals.collectAsState()
+    val unassignedEvents by vm.unassignedEvents.collectAsState()
+    val financialContexts by vm.financialContexts.collectAsState()
+
 
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var selectedCategoryFilter by rememberSaveable { mutableStateOf("All") }
@@ -892,6 +935,10 @@ private fun HistoryScreen(vm: MainViewModel, application: PassportApplication, p
     val recentEvents by vm.recentEvents.collectAsState()
     val accounts by vm.accounts.collectAsState()
     val isMasked = LocalPrivacyMode.current
+    val thisMonthTotals by vm.thisMonthTotals.collectAsState()
+    val unassignedEvents by vm.unassignedEvents.collectAsState()
+    val financialContexts by vm.financialContexts.collectAsState()
+
 
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var selectedStatus by rememberSaveable { mutableStateOf("All") }
@@ -1047,6 +1094,13 @@ private fun HistoryScreen(vm: MainViewModel, application: PassportApplication, p
             account.notes?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onEdit) { Text("Edit") }
+                
+                var showAdjust by remember { mutableStateOf(false) }
+                if (showAdjust) {
+                    var newBalance by remember { mutableStateOf("") }
+                    AlertDialog(onDismissRequest = { showAdjust = false }, title = { Text("Set Current Balance") }, text = { AmountField(newBalance, { newBalance = it }, "Actual balance in account") }, confirmButton = { Button(onClick = { val target = PkrMoneyInput.toMinorUnits(newBalance); val diff = target - (account.openingBalanceMinor + movement); vm.addAdjustment(account.id, diff, "Balance Correction"); showAdjust = false }) { Text("Set") } })
+                }
+                TextButton(onClick = { showAdjust = true }) { Text("Set Balance") }
                 if (account.status == "ACTIVE") TextButton(onClick = onArchive) { Text("Archive") } else TextButton(onClick = onReactivate) { Text("Reactivate") }
             }
         }
@@ -1544,6 +1598,10 @@ private fun UtilityProfileDetailsDialog(
                                 ) {
                                     Column {
                                         val isMasked = LocalPrivacyMode.current
+    val thisMonthTotals by vm.thisMonthTotals.collectAsState()
+    val unassignedEvents by vm.unassignedEvents.collectAsState()
+    val financialContexts by vm.financialContexts.collectAsState()
+
                                         Text(monthLabel, style = MaterialTheme.typography.bodyMedium)
                                         Text(
                                             if (isMasked) "PKR ••••••"
@@ -1812,6 +1870,10 @@ private fun MonthlyOccurrenceDetailsDialog(
 
                     if (paymentRecord != null) {
                         val isMasked = LocalPrivacyMode.current
+    val thisMonthTotals by vm.thisMonthTotals.collectAsState()
+    val unassignedEvents by vm.unassignedEvents.collectAsState()
+    val financialContexts by vm.financialContexts.collectAsState()
+
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("Payment Details", style = MaterialTheme.typography.titleMedium)

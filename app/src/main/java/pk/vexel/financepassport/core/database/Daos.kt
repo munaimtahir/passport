@@ -8,6 +8,21 @@ import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
 
 @Dao
+interface FinancialContextDao {
+    @Query("SELECT * FROM financial_contexts ORDER BY domain, name")
+    suspend fun getAll(): List<FinancialContextEntity>
+
+    @Query("SELECT * FROM financial_contexts WHERE status = 'ACTIVE' ORDER BY domain, name")
+    fun observeActive(): Flow<List<FinancialContextEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(context: FinancialContextEntity)
+
+    @Query("SELECT * FROM financial_contexts WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): FinancialContextEntity?
+}
+
+@Dao
 interface AccountDao {
     @Query("SELECT * FROM accounts ORDER BY name")
     suspend fun getAll(): List<AccountEntity>

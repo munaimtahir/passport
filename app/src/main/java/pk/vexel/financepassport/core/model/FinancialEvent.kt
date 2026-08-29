@@ -7,6 +7,7 @@ data class FinancialEvent(
     val type: FinancialEventType,
     val amount: Money,
     val accountId: String?,
+    val contextId: String?,
     val dateEpochDay: Long,
     val description: String,
 )

@@ -47,6 +47,7 @@ class SyntheticDatasetPerformanceDeviceTest {
                                 1000L + i,
                                 "PKR",
                                 account.id,
+                                null,
                                 "Category ${i % 12}",
                                 "Synthetic event $i",
                                 null,

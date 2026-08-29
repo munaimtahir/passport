@@ -26,7 +26,7 @@ class UtilityLedgerIntegrationTest {
     private suspend fun fixture(): Triple<AccountEntity, MonthlyBillOccurrenceEntity, PaymentRecordEntity> {
         repository.addAccount("HBL Personal", "BANK", 100_000_00, context = "Personal / Home")
         val account = database.accountDao().getAll().single()
-        val profile = UtilityBillProfileEntity("utility", "Home Electricity", "Electricity", "demo-ref", 15, 27, "2026-08", "ACTIVE", "Demo Power", null, "Home", null, null, "DISABLED", 1, 1)
+        val profile = UtilityBillProfileEntity("utility", "Home Electricity", "Electricity", "demo-ref", 15, 27, "2026-08", "ACTIVE", "Demo Power", null, "Home", null, null, "DISABLED", null, null, null, 1, 1)
         val occurrence = MonthlyBillOccurrenceEntity("occurrence", profile.id, 2026, 8, LocalDate.of(2026, 8, 15).toEpochDay(), LocalDate.of(2026, 8, 27).toEpochDay(), null, null, 20_000_00, "Pending", null, "Automatic", 1, 1)
         database.utilityBillDao().upsert(profile)
         database.monthlyBillOccurrenceDao().upsert(occurrence)

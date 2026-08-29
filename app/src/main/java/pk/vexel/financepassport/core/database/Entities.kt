@@ -5,6 +5,16 @@ import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
+@Entity(tableName = "financial_contexts", indices = [Index("status")])
+data class FinancialContextEntity(
+    @PrimaryKey val id: String,
+    val domain: String, // "PERSONAL" or "PROFESSIONAL"
+    val name: String,
+    val status: String, // "ACTIVE" or "ARCHIVED"
+    val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long,
+)
+
 @Entity(tableName = "user_profiles")
 data class UserProfileEntity(
     @PrimaryKey val id: String,
@@ -33,7 +43,7 @@ data class AccountEntity(
     val context: String? = null,
 )
 
-@Entity(tableName = "financial_events", indices = [Index("dateEpochDay"), Index("accountId"), Index("incomeSourceId")])
+@Entity(tableName = "financial_events", indices = [Index("dateEpochDay"), Index("accountId"), Index("contextId"), Index("incomeSourceId")])
 data class FinancialEventEntity(
     @PrimaryKey val id: String,
     val eventType: String,
@@ -41,6 +51,7 @@ data class FinancialEventEntity(
     val amountMinor: Long,
     val currency: String,
     val accountId: String?,
+    val contextId: String? = null,
     val category: String?,
     val description: String,
     val notes: String?,
@@ -380,6 +391,9 @@ data class UtilityBillProfileEntity(
     val connectionIdentifier: String?,
     val notes: String?,
     val reminderPreference: String?,
+    val defaultAccountId: String? = null,
+    val defaultContextId: String? = null,
+    val defaultExpenseCategory: String? = null,
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long
 )
@@ -445,6 +459,7 @@ data class PaymentRecordEntity(
     val updatedAtEpochMillis: Long,
     /** Active account used by the canonical ledger expense; null only for pre-v14 legacy payments. */
     val accountId: String? = null,
+    val contextId: String? = null,
     /** Stable one-to-one link to the utility-generated financial event. */
     val financialEventId: String? = null,
 )

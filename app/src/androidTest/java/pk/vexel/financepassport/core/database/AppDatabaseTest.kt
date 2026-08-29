@@ -24,8 +24,8 @@ class AppDatabaseTest {
 
     @Test fun transferLinkAndBothLedgerRowsCommitTogether() = runBlocking {
         val now = 1L
-        val source = FinancialEventEntity("source", "TRANSFER", 1, -1000, "PKR", "a", null, "Move", null, "NOT_RELEVANT", null, now, now)
-        val destination = FinancialEventEntity("destination", "TRANSFER", 1, 1000, "PKR", "b", null, "Move", null, "NOT_RELEVANT", null, now, now)
+        val source = FinancialEventEntity("source", "TRANSFER", 1, -1000, "PKR", "a", null, null, "Move", null, "NOT_RELEVANT", null, now, now)
+        val destination = FinancialEventEntity("destination", "TRANSFER", 1, 1000, "PKR", "b", null, null, "Move", null, "NOT_RELEVANT", null, now, now)
         database.withTransaction {
             database.financialEventDao().insertAll(listOf(source, destination))
             database.transferLinkDao().insert(TransferLinkEntity("link", source.id, destination.id, "group"))
@@ -73,7 +73,7 @@ class AppDatabaseTest {
         val account = database.accountDao().getAll().single()
         repository.updateAccount(account.id, "Renamed", 125_000)
         assertEquals("Renamed", database.accountDao().getById(account.id)?.name)
-        database.financialEventDao().upsert(FinancialEventEntity("event", "EXPENSE", 1, 500, "PKR", account.id, null, "Lunch", null, "UNKNOWN", null, 1, 1))
+        database.financialEventDao().upsert(FinancialEventEntity("event", "EXPENSE", 1, 500, "PKR", account.id, null, null, "Lunch", null, "UNKNOWN", null, 1, 1))
         repository.archiveAccount(account.id)
         assertEquals("ARCHIVED", database.accountDao().getById(account.id)?.status)
         assertEquals(1, database.financialEventDao().getAll().size)
@@ -157,7 +157,7 @@ class AppDatabaseTest {
 
     @Test
     fun recentEventQueryBoundsLargeHistoryDataset() = runBlocking {
-        val events = (0 until 10_000).map { index -> FinancialEventEntity("event-$index", "ADJUSTMENT", index.toLong(), 1, "PKR", null, null, "Synthetic $index", null, "UNKNOWN", null, index.toLong(), index.toLong()) }
+        val events = (0 until 10_000).map { index -> FinancialEventEntity("event-$index", "ADJUSTMENT", index.toLong(), 1, "PKR", null, null, null, "Synthetic $index", null, "UNKNOWN", null, index.toLong(), index.toLong()) }
         events.chunked(500).forEach { database.financialEventDao().insertAll(it) }
         assertEquals(10_000, database.financialEventDao().getAll().size)
         assertEquals(100, database.financialEventDao().observeRecent(100).first().size)
@@ -198,8 +198,8 @@ class AppDatabaseTest {
         repository.addBudget("Food", 10_000)
         val today = java.time.LocalDate.now().toEpochDay()
         database.financialEventDao().insertAll(listOf(
-            FinancialEventEntity("in-month", "EXPENSE", today, 9_000, "PKR", null, "Food", "Groceries", null, "UNKNOWN", null, 1, 1),
-            FinancialEventEntity("wrong-category", "EXPENSE", today, 5_000, "PKR", null, "Fuel", "Petrol", null, "UNKNOWN", null, 1, 1),
+            FinancialEventEntity("in-month", "EXPENSE", today, 9_000, "PKR", null, null, "Food", "Groceries", null, "UNKNOWN", null, 1, 1),
+            FinancialEventEntity("wrong-category", "EXPENSE", today, 5_000, "PKR", null, null, "Fuel", "Petrol", null, "UNKNOWN", null, 1, 1),
         ))
         val statuses = repository.currentMonthBudgetStatuses.first()
         val food = statuses.single { it.category == "Food" }
@@ -237,8 +237,8 @@ class AppDatabaseTest {
         val account = database.accountDao().getAll().single()
         val today = java.time.LocalDate.now().toEpochDay()
         database.financialEventDao().insertAll(listOf(
-            FinancialEventEntity("salary", "INCOME", today, 30_000, "PKR", account.id, null, "Salary", null, "UNKNOWN", null, 1, 1),
-            FinancialEventEntity("groceries", "EXPENSE", today, 5_000, "PKR", account.id, null, "Groceries", null, "UNKNOWN", null, 1, 1),
+            FinancialEventEntity("salary", "INCOME", today, 30_000, "PKR", account.id, null, null, "Salary", null, "UNKNOWN", null, 1, 1),
+            FinancialEventEntity("groceries", "EXPENSE", today, 5_000, "PKR", account.id, null, null, "Groceries", null, "UNKNOWN", null, 1, 1),
         ))
         repository.addAsset("Car", "VEHICLE", 800_000)
         repository.addLiability(context, "Loan", "PERSONAL", 200_000)
@@ -260,9 +260,9 @@ class AppDatabaseTest {
         repository.addAccount("Main", "CASH", 100_000)
         val account = database.accountDao().getAll().single()
         database.financialEventDao().insertAll(listOf(
-            FinancialEventEntity("income", "INCOME", 1, 25_000, "PKR", account.id, null, "Salary", null, "UNKNOWN", null, 1, 1),
-            FinancialEventEntity("expense", "EXPENSE", 1, 7_500, "PKR", account.id, null, "Lunch", null, "UNKNOWN", null, 1, 1),
-            FinancialEventEntity("transfer-out", "TRANSFER", 1, -10_000, "PKR", account.id, null, "Move", null, "NOT_RELEVANT", null, 1, 1),
+            FinancialEventEntity("income", "INCOME", 1, 25_000, "PKR", account.id, null, null, "Salary", null, "UNKNOWN", null, 1, 1),
+            FinancialEventEntity("expense", "EXPENSE", 1, 7_500, "PKR", account.id, null, null, "Lunch", null, "UNKNOWN", null, 1, 1),
+            FinancialEventEntity("transfer-out", "TRANSFER", 1, -10_000, "PKR", account.id, null, null, "Move", null, "NOT_RELEVANT", null, 1, 1),
         ))
         assertEquals(7_500L, database.financialEventDao().observeAccountMovement(account.id).first())
         assertEquals(3, database.financialEventDao().observeActiveCount().first())
