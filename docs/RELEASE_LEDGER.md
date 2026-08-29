@@ -30,6 +30,16 @@ Room v14 migration, attachment lifecycle, PIN management and screenshot protecti
 passed on hardware-accelerated emulator. Release bundle signed with production release key. See
 `docs/verification/SPRINT_24_GATE.md` and `docs/verification/SPRINT_24_DEVICE_RESULTS.md`.
 
+**Final device-acceptance rebuild (2026-08-29):** versionName `1.1.0`, versionCode `4`; signed AAB
+rebuilt after the final emulator remediation and accepted on API 26, API 35, and API 36 emulators
+(68/68 connected tests on each). This is the bundle intended for Closed testing upload because the
+Play Console's current highest versionCode is `3`.
+
+| File | SHA-256 |
+| --- | --- |
+| `app-release.aab` | `9f6dd8621771e8c16dfc674187eaee5ab7e5ee480f8faa6d4aa6e9724bd0aeda` |
+| `app-release.apk` | `40a482de2e457e3b61120be7fa60f0e33d39c1e965ecaddcdabe28e49d5e8ddf` |
+
 ---
 
 ## v1.0.3 (versionCode 3) — 2026-08-24
