@@ -1,7 +1,10 @@
 package pk.vexel.financepassport.ui
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.pdf.PdfDocument
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.ByteArrayOutputStream
@@ -17,6 +20,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import pk.vexel.financepassport.PassportApplication
 import pk.vexel.financepassport.core.database.DocumentEntity
+import pk.vexel.financepassport.core.files.DocumentVault
 import pk.vexel.financepassport.core.security.KeystoreCryptoService
 
 @RunWith(AndroidJUnit4::class)
@@ -67,6 +71,28 @@ class DocumentPreviewDeviceTest {
         return DocumentEntity(id, filename, "Test", filename, mime, plaintext.size.toLong(), file.absolutePath, digest, null, Instant.now().toEpochMilli()).also {
             application.repository.database.documentDao().insert(it)
             documents += it
+        }
+    }
+
+    private fun renderDocumentPreview(application: PassportApplication, document: DocumentEntity): Bitmap {
+        val plaintext = DocumentVault(application, application.repository).decrypt(document)
+        if (document.mimeType != "application/pdf") {
+            return requireNotNull(BitmapFactory.decodeByteArray(plaintext, 0, plaintext.size))
+        }
+
+        val previewFile = File(application.cacheDir, "${document.id}.pdf").apply { writeBytes(plaintext) }
+        return try {
+            ParcelFileDescriptor.open(previewFile, ParcelFileDescriptor.MODE_READ_ONLY).use { descriptor ->
+                PdfRenderer(descriptor).use { renderer ->
+                    renderer.openPage(0).use { page ->
+                        Bitmap.createBitmap(page.width, page.height, Bitmap.Config.ARGB_8888).also { bitmap ->
+                            page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        }
+                    }
+                }
+            }
+        } finally {
+            previewFile.delete()
         }
     }
 }
