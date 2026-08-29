@@ -39,6 +39,8 @@ Play Console's current highest versionCode is `3`.
 | --- | --- |
 | `app-release.aab` | `9f6dd8621771e8c16dfc674187eaee5ab7e5ee480f8faa6d4aa6e9724bd0aeda` |
 | `app-release.apk` | `40a482de2e457e3b61120be7fa60f0e33d39c1e965ecaddcdabe28e49d5e8ddf` |
+| `mapping.txt` | `2dba97421c639847276945f559679f3b490e2a26fbff01e02f63129c6f936b9c` |
+| `debug-symbols.zip` (mapping archive) | `283939e844a835c9fe56ccb65cdfdb1482a4c1a8098a5521d059bce3ad733cd6` |
 
 ---
 
