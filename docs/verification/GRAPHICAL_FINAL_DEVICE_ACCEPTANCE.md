@@ -1,9 +1,9 @@
 # Vexel Finance Passport — Graphical Final Device Acceptance
 
 Date: 2026-08-29 (Asia/Karachi)  
-Verdict: **PARTIALLY VERIFIED — Android device/emulator unavailable**
+Verdict: **PARTIALLY VERIFIED — connected emulator suite has unresolved failures**
 
-This sprint was executed from a clean ADB check. No connected device was present, and no `emulator` executable or usable local AVD was available. Consequently, device installation, connected tests, manual UI walkthroughs, visual inspection, accessibility, runtime security, backup/restore, migration execution, rotation, and logcat gates were not claimed as passed.
+The SDK emulator was subsequently started. The physical Vivo device was intentionally excluded from all Gradle runs with `ANDROID_SERIAL=emulator-5554`.
 
 ## Device establishment
 
@@ -15,7 +15,7 @@ adb shell getprop ro.build.version.release
 adb shell getprop ro.build.version.sdk
 ```
 
-Observed result: `List of devices attached` with no entries; the property commands returned `adb: no devices/emulators found`. `emulator -list-avds` could not run because `emulator` is not installed/on PATH. No emulator identifier, Android release, or API level can therefore be recorded.
+Final compatibility emulator: `emulator-5554`, AVD `Android_26_Test`, Android 8.0.0, API 26. API 36 and API 35 also booted but exhibited System UI non-responsiveness during UI tests.
 
 ## Build and test execution
 
@@ -34,14 +34,16 @@ Results:
 - `assembleDebugAndroidTest`: initially failed because `DocumentPreviewDeviceTest` referenced missing `renderDocumentPreview`; the test helper was implemented and the command was rerun successfully.
 - `test`: PASS. 22 suites, 78 unique JVM test methods, 0 failed, 0 skipped, 0 errors in debug; release also completed with 22 suites / 78 tests / 0 failed / 0 skipped / 0 errors.
 - Instrumentation discovery: 18 classes and 68 `@Test` methods.
-- `connectedDebugAndroidTest`: NOT EXECUTED; Gradle stopped before test execution with `DeviceException: No connected devices!`.
+- `ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest` on API 36: 61 passed, 7 failed, 0 skipped; System UI became non-responsive.
+- The same command on API 35: 60 passed, 8 failed, 0 skipped; System UI also became non-responsive.
+- The same command on API 26: 61 passed, 7 failed, 0 skipped. The first isolated failure, `ManualE2EWalkthroughDeviceTest`, reproduced from clean state while waiting for the newly created bill; later UI failures cascaded from that state. API 35 also had `UtilityBackupRestoreDeviceTest` fail with `expected Paid but was Due soon`.
 
 ## Acceptance gates
 
 | Gate | Method | Device | Result | Evidence/Notes |
 | ---- | ------ | ------ | ------ | -------------- |
-| Device establishment | ADB properties | None | BLOCKED | No device/emulator attached; no API level available. |
-| Connected Android tests | `./gradlew connectedDebugAndroidTest` | None | BLOCKED | 68 instrumentation methods discovered; 0 executed. |
+| Device establishment | ADB properties and emulator startup | Android_26_Test / API 26 | PASS | `emulator-5554`; Vivo excluded. |
+| Connected Android tests | `ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest` | Android_26_Test / API 26 | FAIL | 68 executed: 61 passed, 7 failed, 0 skipped. |
 | Fresh install and navigation | Install APK and manual walkthrough | None | BLOCKED | No target for install or walkthrough. |
 | Controlled financial dataset and balances | Real UI data entry and independent balance comparison | None | BLOCKED | Not executed. |
 | Transfer invariant | UI transfer and income/expense totals | None | BLOCKED | Not executed on device. |
@@ -55,7 +57,7 @@ Results:
 | Accessibility semantics | Runtime spot-check | None | BLOCKED | Not executed. |
 | Security device regression | PIN, biometric cancel, relock, relaunch, logcat | None | BLOCKED | Not executed; no runtime logcat available. |
 | Backup / restore | Populate, encrypted backup, clear, restore, compare counts/balances | None | BLOCKED | Not executed on device. |
-| Room migrations | `DatabaseMigrationTest` through connected suite | None | BLOCKED | Migration test compiles but did not execute; schema source reports version 14. |
+| Room migrations | `DatabaseMigrationTest` through connected suite | Android_26_Test / API 26 | PASS | All 8 migration methods passed in the connected run. |
 | Rotation / process recreation | Portrait, landscape, rotation, background/process recreation | None | BLOCKED | Not executed. |
 | Logcat sweep | Clear logcat, core walkthrough, inspect fatal/runtime errors | None | BLOCKED | No device logcat available. |
 
@@ -67,4 +69,4 @@ Results:
 
 The required `VERIFIED AFTER REMEDIATION` verdict is not warranted. The corrected verdict is:
 
-**PARTIALLY VERIFIED — device/emulator unavailable; all mandatory device, visual, runtime, connected-test, backup/restore, migration-execution, rotation, accessibility, and logcat evidence remains missing.**
+**PARTIALLY VERIFIED — emulator access is established, but the connected suite has 7 unresolved API 26 failures, including the isolated E2E bill-save workflow.**

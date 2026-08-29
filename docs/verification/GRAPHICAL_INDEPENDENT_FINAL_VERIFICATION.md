@@ -2,7 +2,7 @@
 
 ## Executive Verdict: **PARTIALLY VERIFIED — Android device/emulator unavailable**
 
-The previous `VERIFIED AFTER REMEDIATION` verdict is corrected by the 2026-08-29 final device-acceptance sprint. ADB reported no connected device, no emulator executable/usable AVD was available, and `connectedDebugAndroidTest` terminated with `DeviceException: No connected devices!`. Host build and JVM results do not substitute for the required device evidence. See [GRAPHICAL_FINAL_DEVICE_ACCEPTANCE.md](GRAPHICAL_FINAL_DEVICE_ACCEPTANCE.md) for the complete gate table and commands.
+The previous `VERIFIED AFTER REMEDIATION` verdict is corrected by the 2026-08-29 final device-acceptance sprint. Emulator access was established, but the API 26 connected suite completed with 61/68 passed and 7 failures; the isolated E2E bill-save failure remains unresolved. Host build and JVM results do not substitute for failed device evidence. See [GRAPHICAL_FINAL_DEVICE_ACCEPTANCE.md](GRAPHICAL_FINAL_DEVICE_ACCEPTANCE.md) for the complete gate table and commands.
 
 ---
 
@@ -34,4 +34,4 @@ The implementation of **Vexel Design Language 2.0 (Quiet Financial Memory + Fina
 - **Lint & Deprecations**: Zero compilation errors or unresolved warnings.
 
 ### 5. Final Status
-Host compilation and JVM tests pass, but the mandatory Android device, visual, accessibility, runtime, backup/restore, migration execution, rotation, and logcat gates remain unproven. Final status: **PARTIALLY VERIFIED — Android device/emulator unavailable**.
+Host compilation and JVM tests pass, and emulator access is proven, but connected tests have unresolved failures and the mandatory graphical/runtime gates are not accepted. Final status: **PARTIALLY VERIFIED — connected emulator failures unresolved**.
