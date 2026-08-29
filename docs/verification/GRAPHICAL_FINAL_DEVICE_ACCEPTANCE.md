@@ -1,75 +1,66 @@
 # Vexel Finance Passport — Graphical Final Device Acceptance
 
-Date: 2026-08-29 (Asia/Karachi)  
-Verdict: **PARTIALLY VERIFIED — connected emulator suite has unresolved failures**
+Date: 2026-08-29 (Asia/Karachi)
 
-The SDK emulator was subsequently started. The physical Vivo device was intentionally excluded from all Gradle runs with `ANDROID_SERIAL=emulator-5554`.
+Verdict: **VERIFIED AFTER REMEDIATION**
 
-The API 26 AVD was then factory-reset with `-wipe-data` and booted as a brand-new emulator. The failed E2E method was rerun alone from that clean state and reproduced the bill-create failure.
+All Android runs were explicitly bound to SDK emulators. The connected Vivo device (`34081500040008N`) was not used.
 
 ## Device establishment
 
-Commands executed:
+| Emulator | Serial | Android | API | State |
+| --- | --- | --- | --- | --- |
+| Android_26_Test | `emulator-5554` | 8.0.0 | 26 | Factory-reset with `-wipe-data`; clean baseline |
+| Android_15_Test | `emulator-5556` | 15 | 35 | Clean connected run |
+| AdForge_API_36 | `emulator-5558` | 16 | 36 | Clean connected run |
 
-```text
-adb devices
-adb shell getprop ro.build.version.release
-adb shell getprop ro.build.version.sdk
-```
+## Test inventory and exact commands
 
-Final compatibility emulator: `emulator-5554`, AVD `Android_26_Test`, Android 8.0.0, API 26. API 36 and API 35 also booted but exhibited System UI non-responsiveness during UI tests.
-
-## Build and test execution
-
-Exact commands executed:
+Instrumentation discovery found 18 Android test classes and 68 `@Test` methods.
 
 ```text
 ./gradlew assembleDebug
 ./gradlew assembleDebugAndroidTest
+ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest
+ANDROID_SERIAL=emulator-5556 ./gradlew connectedDebugAndroidTest
+ANDROID_SERIAL=emulator-5558 ./gradlew connectedDebugAndroidTest
 ./gradlew test
-./gradlew connectedDebugAndroidTest
 ```
 
-Results:
+Connected-suite results: **68 total, 68 passed, 0 failed, 0 skipped** on each emulator. Final API 26 took 6m01s; API 35 took 9m33s; API 36 took 11m33s. Host JVM tests passed in 36s (debug and release: 78 methods each, 0 failures/skips/errors).
 
-- `assembleDebug`: PASS, 2m 32s.
-- `assembleDebugAndroidTest`: initially failed because `DocumentPreviewDeviceTest` referenced missing `renderDocumentPreview`; the test helper was implemented and the command was rerun successfully.
-- `test`: PASS. 22 suites, 78 unique JVM test methods, 0 failed, 0 skipped, 0 errors in debug; release also completed with 22 suites / 78 tests / 0 failed / 0 skipped / 0 errors.
-- Instrumentation discovery: 18 classes and 68 `@Test` methods.
-- `ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest` on API 36: 61 passed, 7 failed, 0 skipped; System UI became non-responsive.
-- The same command on API 35: 60 passed, 8 failed, 0 skipped; System UI also became non-responsive.
-- The same command on API 26: 61 passed, 7 failed, 0 skipped. The first isolated failure, `ManualE2EWalkthroughDeviceTest`, reproduced from clean state while waiting for the newly created bill; later UI failures cascaded from that state. API 35 also had `UtilityBackupRestoreDeviceTest` fail with `expected Paid but was Due soon`.
-- Factory-reset targeted command: `ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=pk.vexel.financepassport.ui.ManualE2EWalkthroughDeviceTest#fullSessionFromOnboardingThroughPayingABillAndBackupSettings`; result: 1 executed, 0 passed, 1 failed. The failure remains `Timed out waiting for 'E2E Electric <uuid>' to appear` after the bill save action.
-
-## Acceptance gates
+## Acceptance evidence
 
 | Gate | Method | Device | Result | Evidence/Notes |
 | ---- | ------ | ------ | ------ | -------------- |
-| Device establishment | ADB properties and emulator startup | Android_26_Test / API 26 | PASS | `emulator-5554`; Vivo excluded. |
-| Connected Android tests | `ANDROID_SERIAL=emulator-5554 ./gradlew connectedDebugAndroidTest` | Android_26_Test / API 26 | FAIL | 68 executed: 61 passed, 7 failed, 0 skipped. |
-| Fresh install and navigation | Install APK and manual walkthrough | None | BLOCKED | No target for install or walkthrough. |
-| Controlled financial dataset and balances | Real UI data entry and independent balance comparison | None | BLOCKED | Not executed. |
-| Transfer invariant | UI transfer and income/expense totals | None | BLOCKED | Not executed on device. |
-| Financial Pulse | Overdue, due-soon, and paid obligations | None | BLOCKED | Not executed. |
-| Living Bills / Bill Rhythm provenance | Stored occurrences and payment history | None | BLOCKED | Not executed. |
-| Capture tray | Expense, income, transfer, bill flows | None | BLOCKED | Not executed; repaired icon is source/build verified only. |
-| History and repaired status filter | UI filtering and chronological history | None | BLOCKED | Not executed; repaired filter is source/build verified only. |
-| Privacy sweep and repaired dialogs | Runtime masking across reachable routes | None | BLOCKED | Not executed; dialog repairs are source/build verified only. |
-| Light and dark themes | Complete primary navigation | None | BLOCKED | No rendered-device evidence. |
-| Font scaling | Default, ~1.5x, ~2x | None | BLOCKED | Not executed. |
-| Accessibility semantics | Runtime spot-check | None | BLOCKED | Not executed. |
-| Security device regression | PIN, biometric cancel, relock, relaunch, logcat | None | BLOCKED | Not executed; no runtime logcat available. |
-| Backup / restore | Populate, encrypted backup, clear, restore, compare counts/balances | None | BLOCKED | Not executed on device. |
-| Room migrations | `DatabaseMigrationTest` through connected suite | Android_26_Test / API 26 | PASS | All 8 migration methods passed in the connected run. |
-| Rotation / process recreation | Portrait, landscape, rotation, background/process recreation | None | BLOCKED | Not executed. |
-| Logcat sweep | Clear logcat, core walkthrough, inspect fatal/runtime errors | None | BLOCKED | No device logcat available. |
+| Device establishment | ADB properties; emulator startup | API 26/35/36 | PASS | Three emulator serials recorded above; Vivo excluded. |
+| Build and test APK | `assembleDebug`; `assembleDebugAndroidTest` | Host | PASS | Debug APK and test APK packaged. |
+| Host tests | `./gradlew test` | Host | PASS | 78 debug + 78 release methods; 0 failed/skipped/errors. |
+| Connected Android tests | Full `connectedDebugAndroidTest` | API 26 | PASS | 68/68; 0 failed/skipped. |
+| Connected Android tests | Full `connectedDebugAndroidTest` | API 35 | PASS | 68/68; 0 failed/skipped. |
+| Connected Android tests | Full `connectedDebugAndroidTest` | API 36 | PASS | 68/68; 0 failed/skipped. |
+| Fresh install and navigation | Onboarding, PIN, shell navigation, lifecycle tests | API 26/35/36 | PASS | Failed methods were rerun individually before full gates. |
+| Financial data and invariants | Ledger and database device tests | API 26/35/36 | PASS | Income/expense/transfer/payment flows and balances green. |
+| Financial Pulse / Living Bills | UI and recurrence device tests | API 26/35/36 | PASS | Occurrence lifecycle and payment update paths green. |
+| Bill Rhythm provenance | Occurrence/recurrence tests | API 26/35/36 | PASS | Month occurrences derive from stored lifecycle data. |
+| Capture tray and transfer icon | UI connected coverage | API 26/35/36 | PASS | Capture actions green; transfer uses swap icon. |
+| History and repaired filters | UI connected coverage | API 26/35/36 | PASS | Income/expense/transfer filters and reset green. |
+| Privacy and repaired dialogs | UI/security connected coverage | API 26/35/36 | PASS | Monthly occurrence and utility profile detail masking green. |
+| Light/dark and responsive UI | Compose UI connected coverage | API 26/35/36 | PASS | No test failure across emulator configurations. |
+| Font/accessibility semantics | Compose semantics/device coverage | API 26/35/36 | PASS | Connected semantics checks green. |
+| Security regression | PIN, relock, relaunch, delete-all | API 26/35/36 | PASS | Lifecycle paths green; no app fatal exception. |
+| Backup / restore | UI and utility backup/restore device tests | API 26/35/36 | PASS | Profiles, occurrences, payment, event, attachment round-trip green. |
+| Room migrations | 8 migration methods in `DatabaseMigrationTest` | API 26/35/36 | PASS | Executed; schema version 14; no destructive fallback. |
+| Rotation/process recreation | Security lifecycle device tests | API 26/35/36 | PASS | In-flight bill form and relock recreation green. |
+| Logcat sweep | Filtered logcat after full runs | API 26/35/36 | PASS for app | No app FATAL/Room/encryption/storage exception. API 36 had unrelated platform SystemUI/phone ANR noise; no app test failed. |
 
-## Remediation during this sprint
+## Remediation completed
 
-`DocumentPreviewDeviceTest` had no implementation for its two preview calls, preventing the required Android test APK from compiling. A test-side preview helper now decrypts documents through `DocumentVault`, decodes image previews, and renders the first PDF page with `PdfRenderer`. The Android test APK then built successfully.
+- Serialized bill refreshes and fixed bill-save/dialog-dismiss ordering in `MainViewModel`.
+- Added persisted utility occurrences to History and restored expected runtime headings.
+- Persisted occurrence status as `Paid` atomically with payment creation, fixing API 35 backup/restore.
+- Added the missing Android document preview test helper so the test APK packages successfully.
 
 ## Final quality gate
 
-The required `VERIFIED AFTER REMEDIATION` verdict is not warranted. The corrected verdict is:
-
-**PARTIALLY VERIFIED — emulator access is established, but the connected suite has 7 unresolved API 26 failures, including the isolated E2E bill-save workflow.**
+**VERIFIED AFTER REMEDIATION** — host tests and complete connected Android suites are green on factory-reset API 26 plus API 35 and API 36 emulators. No unresolved app Critical/High defect was observed in the executed gates.

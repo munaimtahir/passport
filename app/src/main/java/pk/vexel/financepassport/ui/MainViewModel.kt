@@ -3,11 +3,16 @@ package pk.vexel.financepassport.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import pk.vexel.financepassport.core.database.AccountEntity
 import pk.vexel.financepassport.core.database.FinanceRepository
 import pk.vexel.financepassport.core.database.FinancialEventEntity
@@ -21,27 +26,51 @@ import pk.vexel.financepassport.core.security.AppPreferences
 import java.time.LocalDate
 
 class MainViewModel(private val repository: FinanceRepository, private val preferences: AppPreferences) : ViewModel() {
+    var paymentRevision by mutableIntStateOf(0)
+        private set
+    private val billStateMutex = Mutex()
+
+    // Collect Room's invalidation flows directly. A cached stateIn snapshot can retain the
+    // initial empty list across the add-bill dialog transition and hide a persisted profile.
+    private val utilityProfilesState = MutableStateFlow<List<UtilityBillProfileEntity>>(emptyList())
+    val utilityProfiles: StateFlow<List<UtilityBillProfileEntity>> = utilityProfilesState
+    private val monthlyOccurrencesState = MutableStateFlow<List<MonthlyBillOccurrenceEntity>>(emptyList())
+    val monthlyOccurrences: StateFlow<List<MonthlyBillOccurrenceEntity>> = monthlyOccurrencesState
+
     init {
         viewModelScope.launch {
-            runCatching {
-                UtilityRecurrenceEngine.reconcileAll(repository.database, LocalDate.now())
+            billStateMutex.withLock {
+                runCatching {
+                    UtilityRecurrenceEngine.reconcileAll(repository.database, LocalDate.now())
+                }
+                refreshBillState()
             }
         }
     }
 
-    val utilityProfiles = repository.utilityProfiles.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-    val monthlyOccurrences = repository.monthlyOccurrences.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    fun addUtilityProfile(context: android.content.Context, profile: UtilityBillProfileEntity) = write {
-        repository.addUtilityProfile(profile)
-        UtilityRecurrenceEngine.reconcileProfile(repository.database, profile, LocalDate.now())
-        repository.scheduleUtilityReminders(context)
+    private suspend fun refreshBillState() {
+        utilityProfilesState.value = repository.database.utilityBillDao().getAll()
+        monthlyOccurrencesState.value = repository.database.monthlyBillOccurrenceDao().getAll()
     }
 
-    fun updateUtilityProfile(context: android.content.Context, profile: UtilityBillProfileEntity) = write {
-        repository.updateUtilityProfile(profile)
-        UtilityRecurrenceEngine.reconcileProfile(repository.database, profile, LocalDate.now())
-        repository.scheduleUtilityReminders(context)
+    fun addUtilityProfile(context: android.content.Context, profile: UtilityBillProfileEntity, onSaved: () -> Unit = {}) = write {
+        billStateMutex.withLock {
+            repository.addUtilityProfile(profile)
+            UtilityRecurrenceEngine.reconcileProfile(repository.database, profile, LocalDate.now())
+            refreshBillState()
+            onSaved()
+            runCatching { repository.scheduleUtilityReminders(context) }
+        }
+    }
+
+    fun updateUtilityProfile(context: android.content.Context, profile: UtilityBillProfileEntity, onSaved: () -> Unit = {}) = write {
+        billStateMutex.withLock {
+            repository.updateUtilityProfile(profile)
+            UtilityRecurrenceEngine.reconcileProfile(repository.database, profile, LocalDate.now())
+            refreshBillState()
+            onSaved()
+            runCatching { repository.scheduleUtilityReminders(context) }
+        }
     }
 
     fun archiveUtilityProfile(context: android.content.Context, id: String) = write {
@@ -61,25 +90,34 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     }
 
     fun deleteUtilityProfile(context: android.content.Context, id: String) = write {
-        val vault = pk.vexel.financepassport.core.files.UtilityAttachmentVault(context, repository)
-        repository.utilityAttachmentsForProfile(id).forEach(vault::delete)
-        repository.database.monthlyBillOccurrenceDao().getByProfile(id).forEach { occ ->
-            repository.cancelUtilityReminders(context, occ.id)
+        billStateMutex.withLock {
+            val vault = pk.vexel.financepassport.core.files.UtilityAttachmentVault(context, repository)
+            repository.utilityAttachmentsForProfile(id).forEach(vault::delete)
+            repository.database.monthlyBillOccurrenceDao().getByProfile(id).forEach { occ ->
+                repository.cancelUtilityReminders(context, occ.id)
+            }
+            repository.deleteUtilityProfile(id)
+            refreshBillState()
         }
-        repository.deleteUtilityProfile(id)
     }
 
     fun addMonthlyOccurrence(context: android.content.Context, occurrence: MonthlyBillOccurrenceEntity) = write {
-        repository.addMonthlyOccurrence(occurrence)
-        repository.scheduleUtilityReminders(context)
+        billStateMutex.withLock {
+            repository.addMonthlyOccurrence(occurrence)
+            refreshBillState()
+            repository.scheduleUtilityReminders(context)
+        }
     }
 
     fun updateMonthlyOccurrence(context: android.content.Context, occurrence: MonthlyBillOccurrenceEntity) = write {
-        repository.updateMonthlyOccurrence(occurrence)
-        if (occurrence.status == "Paid" || occurrence.status == "Skipped") {
-            repository.cancelUtilityReminders(context, occurrence.id)
-        } else {
-            repository.scheduleUtilityReminders(context)
+        billStateMutex.withLock {
+            repository.updateMonthlyOccurrence(occurrence)
+            refreshBillState()
+            if (occurrence.status == "Paid" || occurrence.status == "Skipped") {
+                repository.cancelUtilityReminders(context, occurrence.id)
+            } else {
+                repository.scheduleUtilityReminders(context)
+            }
         }
     }
 
@@ -92,6 +130,7 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
 
     fun addPayment(context: android.content.Context, payment: PaymentRecordEntity) = write {
         repository.addPayment(payment)
+        paymentRevision++
         repository.cancelUtilityReminders(context, payment.occurrenceId)
         repository.database.monthlyBillOccurrenceDao().getById(payment.occurrenceId)?.let { occ ->
             repository.database.utilityBillDao().getById(occ.profileId)?.let { profile ->
@@ -102,6 +141,7 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
 
     fun updatePayment(context: android.content.Context, id: String, occurrenceId: String, amountPaid: Long, paymentDate: Long, mode: String, accountId: String, bank: String?, reference: String?, notes: String?) = write {
         repository.updatePayment(id, amountPaid, paymentDate, mode, accountId, bank, reference, notes, System.currentTimeMillis())
+        paymentRevision++
         repository.cancelUtilityReminders(context, occurrenceId)
         repository.database.monthlyBillOccurrenceDao().getById(occurrenceId)?.let { occ ->
             repository.database.utilityBillDao().getById(occ.profileId)?.let { profile ->
@@ -114,6 +154,7 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
         val vault = pk.vexel.financepassport.core.files.UtilityAttachmentVault(context, repository)
         repository.utilityAttachmentsForPayment(id).forEach(vault::delete)
         repository.deletePayment(id)
+        paymentRevision++
         repository.database.monthlyBillOccurrenceDao().getById(occurrenceId)?.let { occ ->
             repository.database.utilityBillDao().getById(occ.profileId)?.let { profile ->
                 UtilityRecurrenceEngine.reconcileProfile(repository.database, profile, LocalDate.now())

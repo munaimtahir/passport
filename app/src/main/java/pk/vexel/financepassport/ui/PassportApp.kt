@@ -306,7 +306,7 @@ private fun MoreDialog(vm: MainViewModel, application: PassportApplication, onDi
                     .testTag("more-dialog-scroll"),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text("Offline local backup and security controls", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Offline local backup and data controls", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 status?.let { Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium) }
 
                 Button(
@@ -467,8 +467,8 @@ private fun HomeScreen(
     padding: PaddingValues,
     onNavigate: (Int) -> Unit,
 ) {
-    val profiles by vm.utilityProfiles.collectAsState()
-    val occurrences by vm.monthlyOccurrences.collectAsState()
+    val profiles by vm.utilityProfiles.collectAsState(initial = emptyList())
+    val occurrences by vm.monthlyOccurrences.collectAsState(initial = emptyList())
     val financialPosition by vm.financialPosition.collectAsState()
     val activeAccounts by vm.activeAccounts.collectAsState()
     val recentEvents by vm.recentEvents.collectAsState()
@@ -477,6 +477,8 @@ private fun HomeScreen(
     var quickEvent by rememberSaveable { mutableStateOf<Boolean?>(null) }
     var quickBill by rememberSaveable { mutableStateOf(false) }
     val today = remember { LocalDate.now() }
+
+    Text("Dashboard", style = MaterialTheme.typography.titleMedium)
 
     val unpaidObligations = remember(occurrences, today) {
         occurrences.filter {
@@ -787,8 +789,8 @@ private fun MoneyScreen(vm: MainViewModel, application: PassportApplication, pad
 
 @Composable
 private fun BillsScreen(vm: MainViewModel, application: PassportApplication, padding: PaddingValues) {
-    val profiles by vm.utilityProfiles.collectAsState()
-    val occurrences by vm.monthlyOccurrences.collectAsState()
+    val profiles by vm.utilityProfiles.collectAsState(initial = emptyList())
+    val occurrences by vm.monthlyOccurrences.collectAsState(initial = emptyList())
     val isMasked = LocalPrivacyMode.current
 
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -819,6 +821,7 @@ private fun BillsScreen(vm: MainViewModel, application: PassportApplication, pad
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("Living Bills", style = MaterialTheme.typography.headlineMedium)
+        Text("Utility Connections", style = MaterialTheme.typography.titleMedium)
 
         OutlinedTextField(
             value = searchQuery,
@@ -884,8 +887,8 @@ private fun BillsScreen(vm: MainViewModel, application: PassportApplication, pad
 
 @Composable
 private fun HistoryScreen(vm: MainViewModel, application: PassportApplication, padding: PaddingValues) {
-    val occurrences by vm.monthlyOccurrences.collectAsState()
-    val profiles by vm.utilityProfiles.collectAsState()
+    val occurrences by vm.monthlyOccurrences.collectAsState(initial = emptyList())
+    val profiles by vm.utilityProfiles.collectAsState(initial = emptyList())
     val recentEvents by vm.recentEvents.collectAsState()
     val accounts by vm.accounts.collectAsState()
     val isMasked = LocalPrivacyMode.current
@@ -904,6 +907,7 @@ private fun HistoryScreen(vm: MainViewModel, application: PassportApplication, p
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text("Financial Memory", style = MaterialTheme.typography.headlineMedium)
+        Text("Global Bill & Payment History", style = MaterialTheme.typography.titleMedium)
 
         OutlinedTextField(
             value = searchQuery,
@@ -970,8 +974,17 @@ private fun HistoryScreen(vm: MainViewModel, application: PassportApplication, p
                 matchesSearch && matchesCategory && matchesStatus
             }
         }
+        val filteredOccurrences = remember(occurrences, profiles, searchQuery, selectedStatus, selectedCategory) {
+            if (selectedStatus != "All") emptyList() else occurrences.filter { occurrence ->
+                val profile = profiles.firstOrNull { it.id == occurrence.profileId }
+                val matchesSearch = profile?.name?.contains(searchQuery, ignoreCase = true) == true ||
+                    profile?.category?.contains(searchQuery, ignoreCase = true) == true
+                val matchesCategory = selectedCategory == "All" || profile?.category.equals(selectedCategory, ignoreCase = true)
+                matchesSearch && matchesCategory
+            }
+        }
 
-        if (filteredEvents.isEmpty() && occurrences.isEmpty()) {
+        if (filteredEvents.isEmpty() && filteredOccurrences.isEmpty()) {
             VexelEmptyState(
                 title = "Financial Memory is Empty",
                 description = "As you add bills, income, and expenses, your chronological financial record will be securely stored here.",
@@ -995,6 +1008,23 @@ private fun HistoryScreen(vm: MainViewModel, application: PassportApplication, p
                             onClick = {},
                             isMasked = isMasked,
                         )
+                    }
+                }
+                items(filteredOccurrences, key = { "bill-${it.id}" }) { occurrence ->
+                    val profile = profiles.firstOrNull { it.id == occurrence.profileId }
+                    Card(
+                        onClick = { selectedOccurrenceForDetails = occurrence },
+                        modifier = Modifier.fillMaxWidth().testTag("history-bill-${occurrence.id}"),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Text(profile?.name ?: "Utility bill", style = MaterialTheme.typography.titleMedium)
+                            Text(
+                                "Bill · ${occurrence.status}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
@@ -1282,7 +1312,7 @@ private fun AddBillDialog(
     var reminderPreference by rememberSaveable { mutableStateOf(profileToEdit?.reminderPreference ?: "ENABLED") }
     var notes by rememberSaveable { mutableStateOf(profileToEdit?.notes ?: "") }
 
-    val profiles by vm.utilityProfiles.collectAsState()
+    val profiles by vm.utilityProfiles.collectAsState(initial = emptyList())
     var duplicateWarningShown by remember { mutableStateOf(false) }
     var forceSave by remember { mutableStateOf(false) }
 
@@ -1400,11 +1430,10 @@ private fun AddBillDialog(
                         updatedAtEpochMillis = now,
                     )
                     if (profileToEdit != null) {
-                        vm.updateUtilityProfile(context, profile)
+                        vm.updateUtilityProfile(context, profile, onSaved = onDismiss)
                     } else {
-                        vm.addUtilityProfile(context, profile)
+                        vm.addUtilityProfile(context, profile, onSaved = onDismiss)
                     }
-                    onDismiss()
                 },
                 enabled = isValid,
                 modifier = Modifier.testTag("save-bill-button"),
@@ -1425,7 +1454,7 @@ private fun UtilityProfileDetailsDialog(
     onDismiss: () -> Unit,
 ) {
     val context = LocalContext.current
-    val occurrences by vm.monthlyOccurrences.collectAsState()
+    val occurrences by vm.monthlyOccurrences.collectAsState(initial = emptyList())
     val profileOccurrences = remember(occurrences, profile) {
         occurrences.filter { it.profileId == profile.id }
             .sortedWith(compareByDescending<MonthlyBillOccurrenceEntity> { it.billingYear }.thenByDescending { it.billingMonth })
@@ -1439,7 +1468,7 @@ private fun UtilityProfileDetailsDialog(
     var totalPaidAmount by remember { mutableStateOf(0L) }
     var latestPaymentDateStr by remember { mutableStateOf("-") }
 
-    LaunchedEffect(profileOccurrences) {
+    LaunchedEffect(profileOccurrences, vm.paymentRevision) {
         var total = 0L
         var latestDate = 0L
         for (occ in profileOccurrences) {
@@ -1626,7 +1655,7 @@ private fun AddHistoricalOccurrenceDialog(
     var month by rememberSaveable { mutableStateOf(LocalDate.now().monthValue.toString()) }
     var amount by rememberSaveable { mutableStateOf("") }
     var errorMsg by remember { mutableStateOf<String?>(null) }
-    val occurrences by vm.monthlyOccurrences.collectAsState()
+    val occurrences by vm.monthlyOccurrences.collectAsState(initial = emptyList())
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1689,11 +1718,10 @@ private fun MonthlyOccurrenceDetailsDialog(
     application: PassportApplication,
     onDismiss: () -> Unit,
 ) {
-    val profiles by vm.utilityProfiles.collectAsState()
+    val profiles by vm.utilityProfiles.collectAsState(initial = emptyList())
     val activeAccounts by vm.activeAccounts.collectAsState()
     val profile = remember(profiles, occurrence) { profiles.find { it.id == occurrence.profileId } }
     if (profile == null) {
-        onDismiss()
         return
     }
 

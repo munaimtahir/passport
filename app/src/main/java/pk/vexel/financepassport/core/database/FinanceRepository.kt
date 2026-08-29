@@ -147,6 +147,12 @@ class FinanceRepository(private val db: AppDatabase) {
                 ),
             )
             db.paymentRecordDao().insert(payment.copy(accountId = accountId, financialEventId = eventId))
+            // Payment state is part of the persisted occurrence lifecycle. Keeping it updated in
+            // the same transaction makes backup snapshots and every reader agree immediately,
+            // including callers that do not run the UI reconciliation pass afterward.
+            db.monthlyBillOccurrenceDao().update(
+                occurrence.copy(status = "Paid", updatedAtEpochMillis = now),
+            )
         }
     }
 
