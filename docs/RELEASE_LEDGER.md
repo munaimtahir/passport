@@ -9,6 +9,44 @@ uploaded; see `docs/RELEASE_SIGNING.md` for the signing key identity itself.
 
 ---
 
+## v1.1.5 (versionCode 5) — 2026-09-01 Final Closure
+
+**Track:** Production / Closed testing (ready for release upload)
+
+**Scope:** Wave J Final Closure, Independent Verification & Acceptance Mega Sprint. Includes stability fix for emulator test crashes (OOM remediation).
+
+**Artifacts:**
+
+| File | SHA-256 |
+| --- | --- |
+| `app-release.aab` | `a142419a631ec30cd99d6b5fa1804d8c864833e4b55da484ce6b3d892c26f7ca` |
+| `app-release.apk` | `253bb79acd18374592d5605539d8bc0e0f8ae548ca21e5a26339daf35d7d5507` |
+| `mapping.txt` | `d5a7980597f234d6b6415868b98c0b8120011e58b9690c93ca85a756b0c68326` |
+| `debug-symbols.zip` (mapping archive) | `53b3326a28d85bf42df0303986682befc8e17eeed69c7a3b4d40788bad7a1c34` |
+
+**Verification:** Full automated test suite (102/102 connected tests passed on `passport` API 36 AVD). JVM tests, Lint, and build targets passing.
+
+**Play Store "What's new" (500-char limit, as submitted):**
+```
+What's new:
+• Hardened security: Background privacy masking & screenshot protection
+• Full encrypted vault for offline backup and restore
+• Comprehensive PDF report generation for ledgers
+• Data ownership: Export your financial records to CSV or JSON
+• Complete local offline-first architecture with strict privacy
+• Resolves an issue with application crashes on certain device configurations
+• Extensive stability and performance improvements
+```
+
+**Full changelog (internal, not for the Play listing):**
+- Finalizes Wave J with the Backup & Restore module featuring PIN-encrypted payload extraction and validation.
+- Implements `DataExportService` for full local JSON and CSV export via Android's Storage Access Framework.
+- Introduces native Android `PdfDocument` rendering for statement generation with accurate pagination and clipping.
+- Hardens the application shell with FLAG_SECURE and lifecycle-aware privacy screens.
+- Mitigates an aggressive lifecycle termination (OOM signal 9) issue seen on API 36 by restructuring test `@Before` teardowns and optimizing Compose redraws.
+
+---
+
 ## v1.1.0 (versionCode 4) — 2026-08-29 Sprint 24 release
 
 **Track:** Production / Closed testing (ready for release upload)

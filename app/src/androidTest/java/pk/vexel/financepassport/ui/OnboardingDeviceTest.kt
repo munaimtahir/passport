@@ -13,6 +13,8 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.rule.GrantPermissionRule
+import androidx.test.core.app.ApplicationProvider
+import org.junit.Before
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -21,6 +23,8 @@ import org.junit.runner.RunWith
 import org.junit.rules.TestRule
 import org.junit.runners.model.Statement
 import pk.vexel.financepassport.MainActivity
+import pk.vexel.financepassport.PassportApplication
+import pk.vexel.financepassport.core.security.PinStore
 
 /**
  * Covers the current utility-tracker onboarding flow: two informational pages, an optional PIN
@@ -43,6 +47,14 @@ class OnboardingDeviceTest {
         override fun apply(base: Statement, description: Description): Statement = if (Build.VERSION.SDK_INT >= 33) {
             GrantPermissionRule.grant(Manifest.permission.POST_NOTIFICATIONS).apply(base, description)
         } else base
+    }
+
+    @Before
+    fun resetOnboardingStateForEachTest() {
+        val application = ApplicationProvider.getApplicationContext<PassportApplication>()
+        application.preferences.clear()
+        PinStore(application).clear()
+        composeRule.waitForIdle()
     }
 
     @Test

@@ -6,10 +6,11 @@ import pk.vexel.financepassport.core.database.FinancialEventEntity
 import pk.vexel.financepassport.core.database.TaxAnnualDraftEntity
 import pk.vexel.financepassport.core.database.TaxMappingEntity
 import pk.vexel.financepassport.core.database.WealthSnapshotEntity
+import pk.vexel.financepassport.core.database.PositionSnapshotEntity
 
 class DataExportTest {
     @Test fun jsonAndCsvContainCanonicalEventFields() {
-        val snapshot = ExportSnapshot(emptyList(), listOf(FinancialEventEntity("1", "INCOME", 1, 100, "PKR", null, null, "Salary, June", null, "RELEVANT", null, 1, 1)), emptyList(), emptyList(), emptyList(), emptyList())
+        val snapshot = ExportSnapshot(emptyList(), listOf(FinancialEventEntity("1", "INCOME", 1, 100, "PKR", null, null, null, "Salary, June", null, "RELEVANT", null, 1, 1)), emptyList(), emptyList(), emptyList(), emptyList())
         val service = DataExportService()
         assertTrue(service.json(snapshot).contains("financialEvents"))
         assertTrue(service.csvEvents(snapshot).contains("\"Salary, June\""))
@@ -29,5 +30,13 @@ class DataExportTest {
         assertTrue(json.contains("\"snap1\""))
         assertTrue(json.contains("\"taxDrafts\""))
         assertTrue(json.contains("\"draftVersion\":2"))
+    }
+
+    @Test fun jsonExportIncludesImmutablePositionSnapshots() {
+        val snapshot = ExportSnapshot(
+            emptyList(), emptyList(), emptyList(), emptyList(), emptyList(), emptyList(),
+            positionSnapshots = listOf(PositionSnapshotEntity("position-1", "MANUAL", 10, 1, 2, 3, 4, 5, 5, 1)),
+        )
+        assertTrue(DataExportService().json(snapshot).contains("\"position-1\""))
     }
 }

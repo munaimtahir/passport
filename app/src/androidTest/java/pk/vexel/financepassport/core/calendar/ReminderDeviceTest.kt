@@ -91,6 +91,21 @@ class ReminderDeviceTest {
     }
 
     @Test
+    fun dismissPersistsWithoutChangingTheFinancialSource() = runBlocking {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).allowMainThreadQueries().build()
+        val repository = FinanceRepository(database)
+        repository.addCalendarItem(context, "Review", "REVIEW", 5)
+        val itemId = database.openHelper.writableDatabase.query("SELECT id FROM calendar_items LIMIT 1").use { cursor -> cursor.moveToFirst(); cursor.getString(0) }
+        val item = database.calendarDao().getById(itemId) ?: error("Reminder missing")
+        repository.updateCalendarStatus(context, item.id, "DISMISSED")
+        assertEquals("DISMISSED", database.calendarDao().getById(item.id)?.status)
+        assertTrue(database.financialEventDao().getAll().isEmpty())
+        WorkManager.getInstance(context).cancelUniqueWork("reminder-${item.id}")
+        database.close()
+    }
+
+    @Test
     fun processingDueRecurringItemRemindsWithoutCreatingConfirmedEventAndAdvances() = runBlocking {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java).allowMainThreadQueries().build()

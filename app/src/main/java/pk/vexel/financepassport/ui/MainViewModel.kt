@@ -196,11 +196,13 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     val assets = repository.assets.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val liabilities = repository.liabilities.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val investments = repository.investments.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val simpleInvestments = repository.simpleInvestments.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val receivables = repository.receivables.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val goals = repository.goals.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val goalProgress = repository.goalProgress.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val officialRecords = repository.officialRecords.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val calendarItems = repository.calendarItems.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val positionSnapshots = repository.positionSnapshots.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val documents = repository.documents.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val drafts = repository.drafts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val taxIssues = repository.taxIssues.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -242,6 +244,9 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     fun transfer(source: String, destination: String, amountMinor: Long, description: String, date: LocalDate = LocalDate.now()) = write { repository.transfer(source, destination, amountMinor, description, date) }
     fun addAsset(title: String, valueMinor: Long) = write { repository.addAsset(title, "OTHER", valueMinor) }
     fun updateAssetValuation(id: String, valueMinor: Long) = write { repository.updateAssetValuation(id, valueMinor) }
+    fun updateAssetPosition(id: String, valueMinor: Long, ownershipPercent: Int, includeInNetWorth: Boolean) = write { repository.updateAssetPosition(id, valueMinor, ownershipPercent, includeInNetWorth) }
+    fun recordPositionSnapshot(kind: String = "MANUAL") = write { repository.recordPositionSnapshot(kind) }
+    fun reconcileCalendarProjection() = write { repository.reconcileCalendarProjection() }
     fun disposeAsset(id: String, valueMinor: Long) = write { repository.disposeAsset(id, valueMinor) }
     fun addLiability(
         context: android.content.Context,
@@ -280,6 +285,8 @@ class MainViewModel(private val repository: FinanceRepository, private val prefe
     fun updateTaxEvidenceState(id: String, evidenceState: String) = write { repository.updateTaxEvidenceState(id, evidenceState) }
     fun addManualTaxItem(type: String, amountMinor: Long, description: String, date: LocalDate = LocalDate.now()) = write { repository.addManualTaxItem(type, amountMinor, description, date) }
     fun linkDocument(documentId: String, entityType: String, entityId: String) = write { repository.linkDocument(documentId, entityType, entityId) }
+    fun unlinkDocument(documentId: String, entityType: String, entityId: String) = write { repository.unlinkDocument(documentId, entityType, entityId) }
+    fun replaceDocumentLink(oldDocumentId: String, newDocumentId: String, entityType: String, entityId: String) = write { repository.replaceDocumentLink(oldDocumentId, newDocumentId, entityType, entityId) }
     fun deleteDocument(documentId: String) = write { repository.deleteDocument(documentId) }
     suspend fun documentDependencyCount(documentId: String) = repository.documentDependencyCount(documentId)
     fun scheduleDocumentExpiry(context: android.content.Context, documentId: String, title: String, expiryDateEpochDay: Long) = write { repository.scheduleDocumentExpiryReminder(context, documentId, title, expiryDateEpochDay) }

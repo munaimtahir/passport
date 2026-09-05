@@ -43,7 +43,7 @@ data class AccountEntity(
     val context: String? = null,
 )
 
-@Entity(tableName = "financial_events", indices = [Index("dateEpochDay"), Index("accountId"), Index("contextId"), Index("incomeSourceId")])
+@Entity(tableName = "financial_events", indices = [Index("dateEpochDay"), Index("accountId"), Index("contextId"), Index("incomeSourceId"), Index("sourceOccurrenceId", unique = true)])
 data class FinancialEventEntity(
     @PrimaryKey val id: String,
     val eventType: String,
@@ -60,6 +60,12 @@ data class FinancialEventEntity(
     val createdAtEpochMillis: Long,
     val updatedAtEpochMillis: Long,
     val incomeSourceId: String? = null,
+    val categoryId: String? = null,
+    val counterparty: String? = null,
+    val sourceTemplateId: String? = null,
+    val sourceOccurrenceId: String? = null,
+    val groupId: String? = null,
+    val cashEffectMinor: Long? = null,
 )
 
 @Entity(tableName = "income_sources", indices = [Index("status")])
@@ -86,6 +92,10 @@ data class AssetEntity(
     val disposalDateEpochDay: Long?,
     val disposalValueMinor: Long?,
     val status: String,
+    val contextId: String? = null,
+    val includeInNetWorth: Boolean = true,
+    val valuationDateEpochDay: Long? = null,
+    val notes: String? = null,
 )
 
 @Entity(tableName = "liabilities", indices = [Index("status")])
@@ -102,6 +112,9 @@ data class LiabilityEntity(
     val status: String,
     val interestRateBps: Int? = null,
     val installmentAmountMinor: Long? = null,
+    val contextId: String? = null,
+    val notes: String? = null,
+    val linkedAssetId: String? = null,
 )
 
 @Entity(tableName = "investment_events", indices = [Index("dateEpochDay"), Index("investmentAccountId")])
@@ -127,6 +140,11 @@ data class ReceivableEntity(
     val outstandingAmountMinor: Long,
     val dueDateEpochDay: Long?,
     val status: String,
+    val receivableType: String = "OTHER",
+    val contextId: String? = null,
+    val notes: String? = null,
+    val activityDateEpochDay: Long? = null,
+    val receivedDateEpochDay: Long? = null,
 )
 
 @Entity(tableName = "goals")
@@ -157,6 +175,79 @@ data class RecurringItemEntity(
     val updatedAtEpochMillis: Long,
     /** Day-of-month the schedule is anchored to; used to clamp month-end rollover without permanent drift. */
     val anchorDayOfMonth: Int = 1,
+)
+
+@Entity(tableName = "categories", indices = [Index("family"), Index("status")])
+data class CategoryEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    val family: String,
+    val parentId: String? = null,
+    val status: String = "ACTIVE",
+    val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long,
+)
+
+@Entity(tableName = "recurring_templates", indices = [Index("status")])
+data class RecurringTemplateEntity(
+    @PrimaryKey val id: String,
+    val title: String,
+    val eventType: String,
+    val amountMode: String,
+    val expectedAmountMinor: Long?,
+    val currency: String,
+    val frequency: String,
+    val intervalCount: Int = 1,
+    val startDateEpochDay: Long,
+    val endDateEpochDay: Long? = null,
+    val defaultAccountId: String? = null,
+    val defaultContextId: String? = null,
+    val defaultCategoryId: String? = null,
+    val counterparty: String? = null,
+    val notes: String? = null,
+    val status: String = "ACTIVE",
+    val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long,
+)
+
+@Entity(tableName = "expected_occurrences", indices = [Index("templateId"), Index("status"), Index("dueDateEpochDay")])
+data class ExpectedOccurrenceEntity(
+    @PrimaryKey val id: String,
+    val templateId: String,
+    val dueDateEpochDay: Long,
+    val expectedAmountMinor: Long?,
+    val status: String = "UPCOMING",
+    val confirmedEventId: String? = null,
+    val createdAtEpochMillis: Long,
+    val updatedAtEpochMillis: Long,
+)
+
+@Entity(tableName = "settlement_events", indices = [Index("entityId"), Index("financialEventId")])
+data class SettlementEventEntity(
+    @PrimaryKey val id: String,
+    val entityType: String,
+    val entityId: String,
+    val financialEventId: String,
+    val principalAmountMinor: Long,
+    val financingCostMinor: Long,
+    val dateEpochDay: Long,
+    val status: String = "ACTIVE",
+)
+
+@Entity(tableName = "simple_investments", indices = [Index("status"), Index("contextId")])
+data class SimpleInvestmentEntity(
+    @PrimaryKey val id: String,
+    val title: String,
+    val type: String,
+    val institution: String? = null,
+    val contextId: String? = null,
+    val acquisitionDateEpochDay: Long,
+    val principalInvestedMinor: Long,
+    val currentEstimatedValueMinor: Long,
+    val currency: String = "PKR",
+    val maturityDateEpochDay: Long? = null,
+    val notes: String? = null,
+    val status: String = "ACTIVE",
 )
 
 @Entity(tableName = "budgets", indices = [Index("category", unique = true), Index("status")])
@@ -299,6 +390,21 @@ data class WealthSnapshotEntity(
     val receivablesValueMinor: Long,
     val liabilitiesValueMinor: Long,
     val netWealthMinor: Long,
+    val createdAtEpochMillis: Long,
+)
+
+/** Immutable point-in-time financial position, independent of tax-year reconciliation. */
+@Entity(tableName = "position_snapshots", indices = [Index("snapshotDateEpochDay"), Index("kind")])
+data class PositionSnapshotEntity(
+    @PrimaryKey val id: String,
+    val kind: String,
+    val snapshotDateEpochDay: Long,
+    val liquidFundsMinor: Long,
+    val investmentsValueMinor: Long,
+    val assetsValueMinor: Long,
+    val receivablesValueMinor: Long,
+    val liabilitiesValueMinor: Long,
+    val netWorthMinor: Long,
     val createdAtEpochMillis: Long,
 )
 

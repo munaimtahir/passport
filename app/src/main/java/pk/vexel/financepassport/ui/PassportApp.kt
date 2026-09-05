@@ -3,6 +3,7 @@ package pk.vexel.financepassport.ui
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.net.Uri
 import android.graphics.pdf.PdfRenderer
 import android.os.ParcelFileDescriptor
 import androidx.activity.compose.LocalActivity
@@ -40,6 +41,7 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Home
@@ -102,6 +104,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -109,6 +112,8 @@ import kotlinx.coroutines.withContext
 import pk.vexel.financepassport.PassportApplication
 import pk.vexel.financepassport.core.database.AccountEntity
 import pk.vexel.financepassport.core.database.BillAttachmentEntity
+import pk.vexel.financepassport.core.database.CalendarItemEntity
+import pk.vexel.financepassport.core.database.DocumentEntity
 import pk.vexel.financepassport.core.database.MonthlyBillOccurrenceEntity
 import pk.vexel.financepassport.core.database.PaymentRecordEntity
 import pk.vexel.financepassport.core.database.UtilityBillProfileEntity
@@ -120,6 +125,9 @@ import pk.vexel.financepassport.core.model.UtilityCategory
 import pk.vexel.financepassport.core.security.LiveRestoreService
 import pk.vexel.financepassport.core.security.PinStore
 import pk.vexel.financepassport.core.security.PinVerifier
+import pk.vexel.financepassport.core.export.DataExportService
+import pk.vexel.financepassport.core.reports.ReportGenerator
+import java.io.ByteArrayOutputStream
 import pk.vexel.financepassport.ui.components.FinancialAttentionCard
 import pk.vexel.financepassport.ui.components.FinancialAttentionItem
 import pk.vexel.financepassport.ui.components.FinancialDayGroupHeader
@@ -134,6 +142,7 @@ import pk.vexel.financepassport.ui.theme.PassportTheme
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
+import java.io.File
 import java.util.UUID
 
 private data class Destination(val label: String, val icon: ImageVector)
@@ -143,6 +152,9 @@ private val destinations = listOf(
     Destination("Money", Icons.Default.AccountBalanceWallet),
     Destination("Bills", Icons.Default.Description),
     Destination("History", Icons.Default.Folder),
+    Destination("Position", Icons.Default.AccountBalance),
+    Destination("Calendar", Icons.Default.Event),
+    Destination("Vault", Icons.Default.Security),
 )
 
 /** Whether monetary values should render masked; toggled from the top app bar and persisted in [pk.vexel.financepassport.core.security.AppPreferences]. */
@@ -194,7 +206,7 @@ fun PassportApp() {
                         ) {
                             Icon(Icons.Default.Add, "Add Bill")
                         }
-                    } else {
+                    } else if (selected < 4) {
                         VexelCaptureControl(onClick = { showCaptureTray = true })
                     }
                 },
@@ -219,6 +231,9 @@ fun PassportApp() {
                     1 -> MoneyScreen(vm, application, padding)
                     2 -> BillsScreen(vm, application, padding)
                     3 -> HistoryScreen(vm, application, padding)
+                    4 -> PositionScreen(vm, padding)
+                    5 -> CalendarScreen(vm, application, padding)
+                    6 -> VaultScreen(vm, application, padding)
                     else -> EmptyModuleScreen(destinations[selected].label, padding)
                 }
             }
@@ -275,7 +290,7 @@ private fun MoreDialog(vm: MainViewModel, application: PassportApplication, onDi
     var requestedReport by rememberSaveable { mutableStateOf("NET_WORTH") }
     var currentYearOnly by rememberSaveable { mutableStateOf(false) }
     var previewReport by remember { mutableStateOf<pk.vexel.financepassport.core.reports.FinancialReport?>(null) }
-    var pendingReportExport by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var pendingDataExport by remember { mutableStateOf<ByteArray?>(null) }
     val scope = rememberCoroutineScope()
     suspend fun reportSnapshot() = application.repository.exportSnapshot().let { snapshot ->
         if (!currentYearOnly) snapshot else {
@@ -295,6 +310,19 @@ private fun MoreDialog(vm: MainViewModel, application: PassportApplication, onDi
     val backupPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) scope.launch { restorePayload = application.contentResolver.openInputStream(uri)?.use { it.readBytes() } }
     }
+    val dataSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        val bytes = pendingDataExport
+        if (uri != null && bytes != null) scope.launch {
+            runCatching { application.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("Unable to open export destination") }
+                .onSuccess { status = "Export saved" }.onFailure { status = "Export failed: ${it.message}" }
+        }
+        pendingDataExport = null
+    }
+    val reportSaver = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        val bytes = pendingDataExport
+        if (uri != null && bytes != null) scope.launch { runCatching { application.contentResolver.openOutputStream(uri)?.use { it.write(bytes) } ?: error("Unable to open export destination") }.onSuccess { status = "PDF report saved" }.onFailure { status = "PDF export failed: ${it.message}" } }
+        pendingDataExport = null
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Settings & Local Data", style = MaterialTheme.typography.titleLarge) },
@@ -308,6 +336,20 @@ private fun MoreDialog(vm: MainViewModel, application: PassportApplication, onDi
             ) {
                 Text("Offline local backup and data controls", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 status?.let { Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelMedium) }
+
+                Text("Reports & data ownership", style = MaterialTheme.typography.titleMedium)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { scope.launch { previewReport = ReportGenerator().netWorth(reportSnapshot(), java.time.Instant.now().toString()) } }, modifier = Modifier.weight(1f)) { Text("Net worth") }
+                    Button(onClick = { scope.launch { previewReport = ReportGenerator().incomeExpense(reportSnapshot(), java.time.Instant.now().toString()) } }, modifier = Modifier.weight(1f)) { Text("Income / expense") }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { scope.launch { previewReport = ReportGenerator().cashFlowSummary(reportSnapshot(), java.time.Instant.now().toString()) } }, modifier = Modifier.weight(1f)) { Text("Cash flow") }
+                    OutlinedButton(onClick = { currentYearOnly = !currentYearOnly }, modifier = Modifier.weight(1f)) { Text(if (currentYearOnly) "Current year" else "All dates") }
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { scope.launch { pendingDataExport = DataExportService().json(reportSnapshot()).toByteArray(); dataSaver.launch("vexel-finance-passport.json") } }, modifier = Modifier.weight(1f)) { Text("Export JSON") }
+                    OutlinedButton(onClick = { scope.launch { pendingDataExport = DataExportService().csvEvents(reportSnapshot()).toByteArray(); dataSaver.launch("financial-events.csv") } }, modifier = Modifier.weight(1f)) { Text("Events CSV") }
+                }
 
                 Button(
                     onClick = { showPinManagement = true },
@@ -393,6 +435,24 @@ private fun MoreDialog(vm: MainViewModel, application: PassportApplication, onDi
                 backupSaver.launch("vexel-finance-passport.backup")
             }.onFailure { status = "Backup failed: ${it.message}" }
         }
+    }
+    previewReport?.let { report ->
+        AlertDialog(
+            onDismissRequest = { previewReport = null },
+            title = { Text(report.title) },
+            text = { Column(Modifier.verticalScroll(rememberScrollState())) { Text("Generated ${report.generatedAt} · ${report.currency} · ${report.scope}", style = MaterialTheme.typography.labelSmall); report.lines.forEach { Text(it, modifier = Modifier.padding(vertical = 3.dp)) } } },
+            confirmButton = {
+                TextButton(onClick = {
+                    val copy = report
+                    val output = ByteArrayOutputStream()
+                    ReportGenerator().writePdf(copy, output)
+                    pendingDataExport = output.toByteArray()
+                    previewReport = null
+                    reportSaver.launch("${copy.title.lowercase().replace(" ", "-")}.pdf")
+                }) { Text("Export PDF") }
+            },
+            dismissButton = { TextButton(onClick = { previewReport = null }) { Text("Close") } },
+        )
     }
     restorePayload?.let { payload ->
         BackupPasswordDialog("Restore encrypted backup", onDismiss = { restorePayload = null }) { password ->
@@ -696,6 +756,127 @@ private fun HomeScreen(
     }
     quickEvent?.let { income -> AddEventDialog(vm, activeAccounts, income) { quickEvent = null } }
     if (quickBill) AddBillDialog(vm, application) { quickBill = false }
+}
+
+@Composable
+private fun PositionScreen(vm: MainViewModel, padding: PaddingValues) {
+    val position by vm.financialPosition.collectAsState()
+    val assets by vm.assets.collectAsState()
+    val liabilities by vm.liabilities.collectAsState()
+    val receivables by vm.receivables.collectAsState()
+    val investments by vm.simpleInvestments.collectAsState()
+    val masked = LocalPrivacyMode.current
+    val amount: (Long) -> String = { if (masked) "PKR ••••••" else PkrMoneyInput.formatMinorUnits(it) }
+    LazyColumn(contentPadding = padding, modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item { Text("Financial Position", style = MaterialTheme.typography.headlineMedium) }
+        item { Card { Column(Modifier.padding(16.dp)) {
+            Text("Net Worth", style = MaterialTheme.typography.titleMedium)
+            Text(amount(position?.netWorthMinor ?: 0), style = MaterialTheme.typography.headlineSmall)
+            Text("Derived from accounts, receivables, investments, assets and liabilities", style = MaterialTheme.typography.bodySmall)
+        } } }
+        item { PositionLine("Liquid Funds", position?.liquidFundsMinor ?: 0, amount) }
+        item { PositionLine("Receivables", position?.receivablesValueMinor ?: 0, amount) }
+        item { PositionLine("Investments", position?.investmentsValueMinor ?: 0, amount) }
+        item { PositionLine("Included Assets", position?.assetsValueMinor ?: 0, amount) }
+        item { PositionLine("Liabilities", position?.liabilitiesValueMinor ?: 0, amount) }
+        item { Text("Sources", style = MaterialTheme.typography.titleMedium) }
+        items(assets) { asset ->
+            Column {
+                Text("Asset · ${asset.title} · ${amount(asset.currentEstimatedValueMinor * asset.ownershipPercent / 100L)}")
+                TextButton(onClick = { vm.updateAssetPosition(asset.id, asset.currentEstimatedValueMinor, asset.ownershipPercent, !asset.includeInNetWorth) }) {
+                    Text(if (asset.includeInNetWorth) "Exclude from Net Worth" else "Include in Net Worth")
+                }
+            }
+        }
+        items(investments) { Text("Investment · ${it.title} · ${amount(it.currentEstimatedValueMinor)}") }
+        items(receivables) { Text("Receivable · ${it.title} · ${amount(it.outstandingAmountMinor)}") }
+        items(liabilities) { Text("Liability · ${it.title} · ${amount(it.outstandingAmountMinor)}") }
+    }
+}
+
+@Composable
+private fun PositionLine(label: String, value: Long, format: (Long) -> String) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) { Row(Modifier.fillMaxWidth().padding(14.dp), horizontalArrangement = Arrangement.SpaceBetween) { Text(label); Text(format(value), style = MaterialTheme.typography.titleMedium) } }
+}
+
+@Composable
+private fun CalendarScreen(vm: MainViewModel, application: PassportApplication, padding: PaddingValues) {
+    val items by vm.calendarItems.collectAsState()
+    LazyColumn(contentPadding = padding, modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item { Text("Financial Calendar", style = MaterialTheme.typography.headlineMedium) }
+        item { Text("Upcoming and attention items are linked to their source records.", style = MaterialTheme.typography.bodyMedium) }
+        items(items.filter { it.status == "OPEN" }) { item -> CalendarRow(item, vm, application) }
+        if (items.none { it.status == "OPEN" }) item { VexelEmptyState("Nothing needs attention", "Your upcoming financial life is clear.", Icons.Default.Event) }
+    }
+}
+
+@Composable
+private fun CalendarRow(item: CalendarItemEntity, vm: MainViewModel, application: PassportApplication) {
+    val date = java.time.Instant.ofEpochMilli(item.dueAtEpochMillis).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+    Card { Column(Modifier.padding(14.dp)) {
+        Text(item.title, style = MaterialTheme.typography.titleMedium)
+        Text("${item.kind} · $date", style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            TextButton(onClick = { vm.updateCalendarStatus(application, item.id, "DISMISSED") }) { Text("Dismiss") }
+            TextButton(onClick = { vm.rescheduleCalendarItem(application, item.id, 24 * 60) }) { Text("Snooze 1 day") }
+        }
+    } }
+}
+
+@Composable
+private fun VaultScreen(vm: MainViewModel, application: PassportApplication, padding: PaddingValues) {
+    val documents by vm.documents.collectAsState()
+    val scope = rememberCoroutineScope()
+    var importError by rememberSaveable { mutableStateOf<String?>(null) }
+    var cameraUri by remember { mutableStateOf<Uri?>(null) }
+    var cameraFile by remember { mutableStateOf<File?>(null) }
+    val camera = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { captured ->
+        val uri = cameraUri
+        val file = cameraFile
+        cameraUri = null
+        cameraFile = null
+        if (uri != null) {
+            if (captured) scope.launch {
+                runCatching { DocumentVault(application, application.repository).import(uri, "Camera evidence", "Receipt") }
+                    .onFailure { importError = it.message ?: "Camera import failed" }
+                file?.delete()
+            } else file?.delete()
+        }
+    }
+    val cameraPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) {
+            val file = File(application.cacheDir, "camera/${UUID.randomUUID()}.jpg").apply { parentFile?.mkdirs() }
+            cameraFile = file
+            val uri = FileProvider.getUriForFile(application, "${application.packageName}.files", file)
+            cameraUri = uri
+            camera.launch(uri)
+        } else importError = "Camera permission was not granted"
+    }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch {
+            runCatching { DocumentVault(application, application.repository).import(uri, "Imported evidence", "Other") }
+                .onFailure { importError = it.message ?: "Import failed" }
+        }
+    }
+    LazyColumn(contentPadding = padding, modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        item { Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) { Text("Evidence Vault", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f)); OutlinedButton(onClick = { cameraPermission.launch(android.Manifest.permission.CAMERA) }) { Text("Camera") }; Button(onClick = { picker.launch(arrayOf("application/pdf", "image/jpeg", "image/png", "image/webp")) }) { Text("Import") } } }
+        item { Text("Encrypted app-private evidence shared across financial records.", style = MaterialTheme.typography.bodyMedium) }
+        importError?.let { message -> item { Text(message, color = MaterialTheme.colorScheme.error) } }
+        items(documents) { document -> DocumentRow(document, vm) }
+        if (documents.isEmpty()) item { VexelEmptyState("No evidence yet", "Import a PDF or image to keep a financial record with its proof.", Icons.Default.Security) }
+    }
+}
+
+@Composable
+private fun DocumentRow(document: DocumentEntity, vm: MainViewModel) {
+    var showDelete by rememberSaveable(document.id) { mutableStateOf(false) }
+    var dependencyCount by rememberSaveable(document.id) { mutableIntStateOf(0) }
+    LaunchedEffect(document.id) { dependencyCount = vm.documentDependencyCount(document.id) }
+    Card { Row(Modifier.fillMaxWidth().padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) { Text(document.title, style = MaterialTheme.typography.titleMedium); Text("${document.mimeType} · ${document.sizeBytes} bytes", style = MaterialTheme.typography.bodySmall); Text(document.sha256.take(12), style = MaterialTheme.typography.labelSmall) }
+        IconButton(onClick = { showDelete = true }) { Icon(Icons.Default.Delete, "Delete document") }
+    } }
+    if (showDelete) AlertDialog(onDismissRequest = { showDelete = false }, title = { Text("Delete evidence?") }, text = { Text(if (dependencyCount == 0) "This removes the encrypted document." else "This document is linked to $dependencyCount record${if (dependencyCount == 1) "" else "s"}. Unlinking and deleting will remove the shared evidence from those records.") }, confirmButton = { Button(onClick = { vm.deleteDocument(document.id); showDelete = false }) { Text("Unlink and Delete") } }, dismissButton = { TextButton(onClick = { showDelete = false }) { Text("Cancel") } })
 }
 
 @Composable
@@ -1598,10 +1779,6 @@ private fun UtilityProfileDetailsDialog(
                                 ) {
                                     Column {
                                         val isMasked = LocalPrivacyMode.current
-    val thisMonthTotals by vm.thisMonthTotals.collectAsState()
-    val unassignedEvents by vm.unassignedEvents.collectAsState()
-    val financialContexts by vm.financialContexts.collectAsState()
-
                                         Text(monthLabel, style = MaterialTheme.typography.bodyMedium)
                                         Text(
                                             if (isMasked) "PKR ••••••"
@@ -1870,10 +2047,6 @@ private fun MonthlyOccurrenceDetailsDialog(
 
                     if (paymentRecord != null) {
                         val isMasked = LocalPrivacyMode.current
-    val thisMonthTotals by vm.thisMonthTotals.collectAsState()
-    val unassignedEvents by vm.unassignedEvents.collectAsState()
-    val financialContexts by vm.financialContexts.collectAsState()
-
                         Card(modifier = Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("Payment Details", style = MaterialTheme.typography.titleMedium)

@@ -15,7 +15,7 @@ class BudgetMathTest {
         BudgetEntity("b-$category", category, limitMinor, "PKR", status, 0, 0)
 
     private fun expense(category: String?, amountMinor: Long, date: LocalDate = LocalDate.of(2026, 1, 15), deleted: Long? = null, type: String = "EXPENSE") =
-        FinancialEventEntity("e-${category}-$amountMinor-${date}", type, date.toEpochDay(), amountMinor, "PKR", "acc", category, "desc", null, "NOT_RELEVANT", deleted, 0, 0)
+        FinancialEventEntity("e-${category}-$amountMinor-${date}", type, date.toEpochDay(), amountMinor, "PKR", "acc", null, category, "desc", null, "NOT_RELEVANT", deleted, 0, 0)
 
     @Test fun computesPercentUsedForSpendWithinTheMonth() {
         val statuses = calculateCategoryBudgets(listOf(budget("Food", 10_000)), listOf(expense("Food", 4_000)), month)

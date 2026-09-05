@@ -7,7 +7,7 @@ import androidx.room.RoomDatabase
 // manifest's schemaVersion is written (FinanceRepository) so the two can never drift apart again —
 // this project has already hit that exact bug twice (the 8->9 and 9->10 boundaries), both times
 // from a hardcoded literal at the manifest call site.
-const val DATABASE_VERSION = 15
+const val DATABASE_VERSION = 17
 
 @Database(
     entities = [
@@ -30,6 +30,7 @@ const val DATABASE_VERSION = 15
         TaxIssueEntity::class,
         WealthReconciliationEntity::class,
         WealthSnapshotEntity::class,
+        PositionSnapshotEntity::class,
         CalendarItemEntity::class,
         DocumentEntity::class,
         DocumentLinkEntity::class,
@@ -41,6 +42,11 @@ const val DATABASE_VERSION = 15
         MonthlyBillOccurrenceEntity::class,
         PaymentRecordEntity::class,
         BillAttachmentEntity::class,
+        CategoryEntity::class,
+        RecurringTemplateEntity::class,
+        ExpectedOccurrenceEntity::class,
+        SettlementEventEntity::class,
+        SimpleInvestmentEntity::class,
     ],
     version = DATABASE_VERSION,
     exportSchema = true,
@@ -62,6 +68,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun calendarDao(): CalendarDao
     abstract fun reconciliationDao(): ReconciliationDao
     abstract fun wealthSnapshotDao(): WealthSnapshotDao
+    abstract fun positionSnapshotDao(): PositionSnapshotDao
     abstract fun investmentDao(): InvestmentDao
     abstract fun receivableDao(): ReceivableDao
     abstract fun goalDao(): GoalDao
@@ -72,4 +79,9 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun monthlyBillOccurrenceDao(): MonthlyBillOccurrenceDao
     abstract fun paymentRecordDao(): PaymentRecordDao
     abstract fun billAttachmentDao(): BillAttachmentDao
+    abstract fun categoryDao(): CategoryDao
+    abstract fun recurringTemplateDao(): RecurringTemplateDao
+    abstract fun expectedOccurrenceDao(): ExpectedOccurrenceDao
+    abstract fun settlementEventDao(): SettlementEventDao
+    abstract fun simpleInvestmentDao(): SimpleInvestmentDao
 }

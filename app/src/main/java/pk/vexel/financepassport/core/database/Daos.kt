@@ -86,6 +86,9 @@ interface WealthDao {
     @Query("UPDATE assets SET currentEstimatedValueMinor = :valueMinor, status = 'ACTIVE' WHERE id = :id")
     suspend fun updateAssetValue(id: String, valueMinor: Long)
 
+    @Query("UPDATE assets SET currentEstimatedValueMinor = :valueMinor, ownershipPercent = :ownershipPercent, includeInNetWorth = :includeInNetWorth, valuationDateEpochDay = :valuationDateEpochDay WHERE id = :id")
+    suspend fun updatePosition(id: String, valueMinor: Long, ownershipPercent: Int, includeInNetWorth: Boolean, valuationDateEpochDay: Long)
+
     @Query("UPDATE assets SET status = 'ARCHIVED', disposalDateEpochDay = :dateEpochDay, disposalValueMinor = :valueMinor WHERE id = :id")
     suspend fun archiveAsset(id: String, dateEpochDay: Long, valueMinor: Long)
 
@@ -204,6 +207,18 @@ interface WealthSnapshotDao {
 }
 
 @Dao
+interface PositionSnapshotDao {
+    @Insert(onConflict = OnConflictStrategy.ABORT)
+    suspend fun insert(snapshot: PositionSnapshotEntity)
+
+    @Query("SELECT * FROM position_snapshots ORDER BY snapshotDateEpochDay DESC, createdAtEpochMillis DESC")
+    fun observeAll(): Flow<List<PositionSnapshotEntity>>
+
+    @Query("SELECT * FROM position_snapshots ORDER BY snapshotDateEpochDay DESC, createdAtEpochMillis DESC")
+    suspend fun getAll(): List<PositionSnapshotEntity>
+}
+
+@Dao
 interface DocumentDao {
     @Query("SELECT * FROM documents ORDER BY createdAtEpochMillis")
     suspend fun getAll(): List<DocumentEntity>
@@ -230,6 +245,12 @@ interface DocumentLinkDao {
 
     @Query("DELETE FROM document_links WHERE documentId = :documentId")
     suspend fun deleteForDocument(documentId: String)
+
+    @Query("DELETE FROM document_links WHERE documentId = :documentId AND entityType = :entityType AND entityId = :entityId")
+    suspend fun deleteLink(documentId: String, entityType: String, entityId: String)
+
+    @Query("SELECT * FROM document_links WHERE entityType = :entityType AND entityId = :entityId")
+    suspend fun getForEntity(entityType: String, entityId: String): List<DocumentLinkEntity>
 }
 
 @Dao
@@ -252,7 +273,7 @@ interface FinancialEventDao {
     @Query("SELECT * FROM financial_events WHERE deletedAtEpochMillis IS NULL ORDER BY dateEpochDay DESC, createdAtEpochMillis DESC LIMIT :limit")
     fun observeRecent(limit: Int): Flow<List<FinancialEventEntity>>
 
-    @Query("SELECT COALESCE(SUM(CASE WHEN eventType = 'EXPENSE' THEN -amountMinor ELSE amountMinor END), 0) FROM financial_events WHERE accountId = :accountId AND deletedAtEpochMillis IS NULL")
+    @Query("SELECT COALESCE(SUM(CASE WHEN cashEffectMinor IS NOT NULL THEN cashEffectMinor WHEN eventType = 'EXPENSE' THEN -amountMinor ELSE amountMinor END), 0) FROM financial_events WHERE accountId = :accountId AND deletedAtEpochMillis IS NULL")
     fun observeAccountMovement(accountId: String): Flow<Long>
 
     @Query("SELECT COUNT(*) FROM financial_events WHERE deletedAtEpochMillis IS NULL")
@@ -263,6 +284,9 @@ interface FinancialEventDao {
 
     @Query("SELECT * FROM financial_events WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): FinancialEventEntity?
+
+    @Query("SELECT * FROM financial_events WHERE sourceOccurrenceId = :occurrenceId AND deletedAtEpochMillis IS NULL LIMIT 1")
+    suspend fun getBySourceOccurrenceId(occurrenceId: String): FinancialEventEntity?
 
     @Query("DELETE FROM financial_events WHERE id = :id")
     suspend fun deleteById(id: String)
@@ -277,7 +301,7 @@ interface FinancialEventDao {
     fun observeExpenseMinor(): Flow<Long>
 
     @Query(
-        "SELECT COALESCE(SUM(CASE WHEN eventType = 'EXPENSE' THEN -amountMinor ELSE amountMinor END), 0) " +
+        "SELECT COALESCE(SUM(CASE WHEN cashEffectMinor IS NOT NULL THEN cashEffectMinor WHEN eventType = 'EXPENSE' THEN -amountMinor ELSE amountMinor END), 0) " +
             "FROM financial_events WHERE deletedAtEpochMillis IS NULL AND accountId IN (SELECT id FROM accounts WHERE status = 'ACTIVE')",
     )
     fun observeActiveAccountsMovement(): Flow<Long>
@@ -400,6 +424,12 @@ interface CalendarDao {
 
     @Query("SELECT * FROM calendar_items WHERE id = :id LIMIT 1")
     suspend fun getById(id: String): CalendarItemEntity?
+
+    @Query("SELECT * FROM calendar_items ORDER BY dueAtEpochMillis")
+    suspend fun getAll(): List<CalendarItemEntity>
+
+    @Query("UPDATE calendar_items SET status = :status WHERE kind = :kind AND linkedEntityId = :linkedEntityId")
+    suspend fun updateSourceStatus(kind: String, linkedEntityId: String, status: String)
 }
 
 @Dao
@@ -505,6 +535,90 @@ interface PaymentRecordDao {
     
     @Query("SELECT * FROM payment_records ORDER BY paymentDateEpochDay DESC")
     suspend fun getAll(): List<PaymentRecordEntity>
+}
+
+@Dao
+interface CategoryDao {
+    @Query("SELECT * FROM categories ORDER BY family, name")
+    suspend fun getAll(): List<CategoryEntity>
+    @Query("SELECT * FROM categories WHERE status = 'ACTIVE' ORDER BY family, name")
+    suspend fun getActive(): List<CategoryEntity>
+
+    @Query("SELECT * FROM categories WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): CategoryEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(category: CategoryEntity)
+
+    @Query("UPDATE categories SET status = 'ARCHIVED', updatedAtEpochMillis = :updatedAt WHERE id = :id")
+    suspend fun archive(id: String, updatedAt: Long)
+}
+
+@Dao
+interface RecurringTemplateDao {
+    @Query("SELECT * FROM recurring_templates ORDER BY startDateEpochDay, title")
+    suspend fun getAll(): List<RecurringTemplateEntity>
+    @Query("SELECT * FROM recurring_templates WHERE status = 'ACTIVE' ORDER BY startDateEpochDay, title")
+    suspend fun getActive(): List<RecurringTemplateEntity>
+
+    @Query("SELECT * FROM recurring_templates WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): RecurringTemplateEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(template: RecurringTemplateEntity)
+
+    @Query("UPDATE recurring_templates SET status = :status, updatedAtEpochMillis = :updatedAt WHERE id = :id")
+    suspend fun updateStatus(id: String, status: String, updatedAt: Long)
+}
+
+@Dao
+interface ExpectedOccurrenceDao {
+    @Query("SELECT * FROM expected_occurrences ORDER BY dueDateEpochDay")
+    suspend fun getAll(): List<ExpectedOccurrenceEntity>
+    @Query("SELECT * FROM expected_occurrences WHERE templateId = :templateId ORDER BY dueDateEpochDay")
+    suspend fun getForTemplate(templateId: String): List<ExpectedOccurrenceEntity>
+
+    @Query("SELECT * FROM expected_occurrences WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): ExpectedOccurrenceEntity?
+
+    @Query("SELECT * FROM expected_occurrences WHERE templateId = :templateId AND dueDateEpochDay = :dueDate LIMIT 1")
+    suspend fun getForTemplateDate(templateId: String, dueDate: Long): ExpectedOccurrenceEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(occurrence: ExpectedOccurrenceEntity)
+
+    @Query("UPDATE expected_occurrences SET status = :status, confirmedEventId = :eventId, updatedAtEpochMillis = :updatedAt WHERE id = :id")
+    suspend fun markResolved(id: String, status: String, eventId: String?, updatedAt: Long)
+}
+
+@Dao
+interface SettlementEventDao {
+    @Query("SELECT * FROM settlement_events ORDER BY dateEpochDay")
+    suspend fun getAll(): List<SettlementEventEntity>
+    @Query("SELECT * FROM settlement_events WHERE entityType = :entityType AND entityId = :entityId ORDER BY dateEpochDay")
+    suspend fun getForEntity(entityType: String, entityId: String): List<SettlementEventEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(settlement: SettlementEventEntity)
+}
+
+@Dao
+interface SimpleInvestmentDao {
+    @Query("SELECT * FROM simple_investments ORDER BY title")
+    suspend fun getAll(): List<SimpleInvestmentEntity>
+    @Query("SELECT * FROM simple_investments ORDER BY title")
+    fun observeAll(): Flow<List<SimpleInvestmentEntity>>
+    @Query("SELECT * FROM simple_investments WHERE status = 'ACTIVE' ORDER BY title")
+    suspend fun getActive(): List<SimpleInvestmentEntity>
+
+    @Query("SELECT * FROM simple_investments WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): SimpleInvestmentEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(investment: SimpleInvestmentEntity)
+
+    @Query("UPDATE simple_investments SET currentEstimatedValueMinor = :valueMinor WHERE id = :id")
+    suspend fun updateValue(id: String, valueMinor: Long)
 }
 
 @Dao

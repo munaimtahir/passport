@@ -1,6 +1,6 @@
 package pk.vexel.financepassport.core.model
 
-enum class FinancialEventType { INCOME, EXPENSE, TRANSFER, ADJUSTMENT }
+enum class FinancialEventType { INCOME, EXPENSE, TRANSFER, ADJUSTMENT, FINANCING }
 
 data class FinancialEvent(
     val id: String,

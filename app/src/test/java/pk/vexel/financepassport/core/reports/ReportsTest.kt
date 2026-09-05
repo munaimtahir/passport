@@ -19,7 +19,7 @@ class ReportsTest {
 
     @Test fun netWorthReportMatchesCanonicalFinancialPositionIndependently() {
         val account = AccountEntity("acc", "Bank", null, "SAVINGS", null, null, "PKR", 500_00, 1, "ACTIVE", null, 1, 1)
-        val income = FinancialEventEntity("in", "INCOME", 10, 1_000_00, "PKR", "acc", null, "Salary", null, "UNKNOWN", null, 1, 1)
+        val income = FinancialEventEntity("in", "INCOME", 10, 1_000_00, "PKR", "acc", null, null, "Salary", null, "UNKNOWN", null, 1, 1)
         val asset = AssetEntity("a", "OTHER", "Car", 1, 10_000_00, 12_000_00, "PKR", 100, null, null, "ACTIVE")
         val snapshot = ExportSnapshot(listOf(account), listOf(income), listOf(asset), emptyList(), emptyList(), emptyList())
 
@@ -52,7 +52,7 @@ class ReportsTest {
     }
 
     @Test fun dateRangeFiltersCanonicalReportInputsWithoutMutatingSnapshot() {
-        val event = FinancialEventEntity("in", "INCOME", 10, 100, "PKR", null, null, "In range", null, "UNKNOWN", null, 1, 1)
+        val event = FinancialEventEntity("in", "INCOME", 10, 100, "PKR", null, null, null, "In range", null, "UNKNOWN", null, 1, 1)
         val outside = event.copy(id = "out", dateEpochDay = 99, description = "Outside")
         val snapshot = ExportSnapshot(
             emptyList(), listOf(event, outside), emptyList(), emptyList(),
@@ -65,5 +65,16 @@ class ReportsTest {
         assertEquals(1, ranged.taxItems.size)
         assertEquals(1, ranged.investments.size)
         assertEquals(2, snapshot.events.size)
+    }
+
+    @Test fun cashFlowUsesCashEffectsAndDoesNotCallTransfersExpenses() {
+        fun event(id: String, type: String, amount: Long, cash: Long) = FinancialEventEntity(id = id, eventType = type, dateEpochDay = 1, amountMinor = amount, currency = "PKR", accountId = "a", contextId = null, category = null, description = id, notes = null, taxRelevance = "UNKNOWN", deletedAtEpochMillis = null, createdAtEpochMillis = 1, updatedAtEpochMillis = 1, cashEffectMinor = cash)
+        val income = event("income", "INCOME", 1_000, 1_000)
+        val transfer = event("transfer", "TRANSFER", -500, -500)
+        val expense = event("expense", "EXPENSE", 200, -200)
+        val report = ReportGenerator().cashFlowSummary(ExportSnapshot(emptyList(), listOf(income, transfer, expense), emptyList(), emptyList(), emptyList(), emptyList()), "now")
+        assertTrue(report.lines.any { it.startsWith("Net cash movement: PKR 3") })
+        assertTrue(report.lines.none { it.startsWith("Expense:") })
+        assertTrue(report.lines.any { it.startsWith("Transfers excluded") })
     }
 }

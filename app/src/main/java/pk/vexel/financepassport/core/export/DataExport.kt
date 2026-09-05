@@ -15,6 +15,20 @@ import pk.vexel.financepassport.core.database.TaxMappingEntity
 import pk.vexel.financepassport.core.database.WealthSnapshotEntity
 import pk.vexel.financepassport.core.database.TaxAnnualDraftEntity
 import pk.vexel.financepassport.core.database.IncomeSourceEntity
+import pk.vexel.financepassport.core.database.CategoryEntity
+import pk.vexel.financepassport.core.database.RecurringTemplateEntity
+import pk.vexel.financepassport.core.database.ExpectedOccurrenceEntity
+import pk.vexel.financepassport.core.database.SettlementEventEntity
+import pk.vexel.financepassport.core.database.SimpleInvestmentEntity
+import pk.vexel.financepassport.core.database.PositionSnapshotEntity
+import pk.vexel.financepassport.core.database.UserProfileEntity
+import pk.vexel.financepassport.core.database.FinancialContextEntity
+import pk.vexel.financepassport.core.database.CalendarItemEntity
+import pk.vexel.financepassport.core.database.DocumentLinkEntity
+import pk.vexel.financepassport.core.database.UtilityBillProfileEntity
+import pk.vexel.financepassport.core.database.MonthlyBillOccurrenceEntity
+import pk.vexel.financepassport.core.database.PaymentRecordEntity
+import pk.vexel.financepassport.core.database.BillAttachmentEntity
 
 data class ExportSnapshot(
     val accounts: List<AccountEntity>, val events: List<FinancialEventEntity>, val assets: List<AssetEntity>,
@@ -26,6 +40,20 @@ data class ExportSnapshot(
     val wealthSnapshots: List<WealthSnapshotEntity> = emptyList(),
     val taxDrafts: List<TaxAnnualDraftEntity> = emptyList(),
     val incomeSources: List<IncomeSourceEntity> = emptyList(),
+    val categories: List<CategoryEntity> = emptyList(),
+    val recurringTemplates: List<RecurringTemplateEntity> = emptyList(),
+    val expectedOccurrences: List<ExpectedOccurrenceEntity> = emptyList(),
+    val settlements: List<SettlementEventEntity> = emptyList(),
+    val simpleInvestments: List<SimpleInvestmentEntity> = emptyList(),
+    val positionSnapshots: List<PositionSnapshotEntity> = emptyList(),
+    val profile: UserProfileEntity? = null,
+    val contexts: List<FinancialContextEntity> = emptyList(),
+    val calendarItems: List<CalendarItemEntity> = emptyList(),
+    val documentLinks: List<DocumentLinkEntity> = emptyList(),
+    val utilityBills: List<UtilityBillProfileEntity> = emptyList(),
+    val billOccurrences: List<MonthlyBillOccurrenceEntity> = emptyList(),
+    val payments: List<PaymentRecordEntity> = emptyList(),
+    val billAttachments: List<BillAttachmentEntity> = emptyList(),
 ) {
     fun forDateRange(fromEpochDay: Long, toEpochDay: Long): ExportSnapshot {
         require(fromEpochDay <= toEpochDay) { "Report range is invalid" }
@@ -40,8 +68,11 @@ data class ExportSnapshot(
 class DataExportService {
     fun json(snapshot: ExportSnapshot): String = buildString {
         append("{\"formatVersion\":1,")
+        append("\"profile\":${snapshot.profile?.let { "{\"id\":${q(it.id)},\"displayName\":${it.displayName?.let(::q) ?: "null"},\"baseCurrency\":${q(it.baseCurrency)}}" } ?: "null"},")
+        append("\"contexts\":["); append(snapshot.contexts.joinToString(",") { "{\"id\":${q(it.id)},\"domain\":${q(it.domain)},\"name\":${q(it.name)},\"status\":${q(it.status)}}" }); append("],")
+        append("\"positionSnapshots\":["); append(snapshot.positionSnapshots.joinToString(",") { "{\"id\":\"" + it.id + "\",\"kind\":\"" + it.kind + "\",\"snapshotDateEpochDay\":" + it.snapshotDateEpochDay + ",\"netWorthMinor\":" + it.netWorthMinor + "}" }); append("],")
         append("\"accounts\":["); append(snapshot.accounts.joinToString(",") { "{\"id\":\"${it.id}\",\"name\":\"${escape(it.name)}\",\"currency\":\"${it.currency}\",\"openingBalanceMinor\":${it.openingBalanceMinor}}" }); append("],")
-        append("\"financialEvents\":["); append(snapshot.events.joinToString(",") { "{\"id\":\"${it.id}\",\"type\":\"${it.eventType}\",\"amountMinor\":${it.amountMinor},\"currency\":\"${it.currency}\",\"description\":\"${escape(it.description)}\"}" }); append("],")
+        append("\"financialEvents\":["); append(snapshot.events.joinToString(",") { "{\"id\":${q(it.id)},\"type\":${q(it.eventType)},\"dateEpochDay\":${it.dateEpochDay},\"amountMinor\":${it.amountMinor},\"cashEffectMinor\":${it.cashEffectMinor ?: "null"},\"currency\":${q(it.currency)},\"accountId\":${it.accountId?.let(::q) ?: "null"},\"contextId\":${it.contextId?.let(::q) ?: "null"},\"category\":${it.category?.let(::q) ?: "null"},\"description\":${q(it.description)}}" }); append("],")
         append("\"assets\":["); append(snapshot.assets.joinToString(",") { "{\"id\":\"${it.id}\",\"title\":\"${escape(it.title)}\",\"valueMinor\":${it.currentEstimatedValueMinor}}" }); append("],")
         append("\"liabilities\":["); append(snapshot.liabilities.joinToString(",") { "{\"id\":\"${it.id}\",\"title\":\"${escape(it.title)}\",\"outstandingMinor\":${it.outstandingAmountMinor}}" }); append("],")
         append("\"taxItems\":["); append(snapshot.taxItems.joinToString(",") { "{\"id\":\"${it.id}\",\"sourceId\":\"${it.sourceId}\",\"type\":\"${it.taxEventType}\",\"amountMinor\":${it.grossAmountMinor ?: 0}}" }); append("],")
@@ -54,7 +85,18 @@ class DataExportService {
         append("\"taxMappings\":["); append(snapshot.taxMappings.joinToString(",") { "{\"id\":\"${it.id}\",\"taxItemId\":\"${it.taxItemId}\",\"rulesetVersion\":\"${escape(it.rulesetVersion)}\",\"taxEventType\":\"${it.taxEventType}\",\"source\":\"${it.source}\",\"supersededByMappingId\":${it.supersededByMappingId?.let { id -> "\"$id\"" } ?: "null"}}" }); append("],")
         append("\"wealthSnapshots\":["); append(snapshot.wealthSnapshots.joinToString(",") { "{\"id\":\"${it.id}\",\"taxYearId\":\"${it.taxYearId}\",\"kind\":\"${it.kind}\",\"netWealthMinor\":${it.netWealthMinor}}" }); append("],")
         append("\"taxDrafts\":["); append(snapshot.taxDrafts.joinToString(",") { "{\"id\":\"${it.id}\",\"taxYearId\":\"${it.taxYearId}\",\"draftVersion\":${it.draftVersion},\"rulesetVersion\":\"${escape(it.rulesetVersion)}\",\"status\":\"${it.status}\"}" }); append("],")
-        append("\"incomeSources\":["); append(snapshot.incomeSources.joinToString(",") { "{\"id\":\"${it.id}\",\"name\":\"${escape(it.name)}\",\"sourceType\":\"${it.sourceType}\",\"status\":\"${it.status}\"}" }); append("]}")
+        append("\"categories\":["); append(snapshot.categories.joinToString(",") { "{\"id\":\"${it.id}\",\"name\":\"${escape(it.name)}\",\"family\":\"${it.family}\",\"status\":\"${it.status}\"}" }); append("] ,")
+        append("\"recurringTemplates\":["); append(snapshot.recurringTemplates.joinToString(",") { "{\"id\":\"${it.id}\",\"title\":\"${escape(it.title)}\",\"eventType\":\"${it.eventType}\",\"frequency\":\"${it.frequency}\"}" }); append("],")
+        append("\"expectedOccurrences\":["); append(snapshot.expectedOccurrences.joinToString(",") { "{\"id\":\"${it.id}\",\"templateId\":\"${it.templateId}\",\"dueDateEpochDay\":${it.dueDateEpochDay},\"status\":\"${it.status}\"}" }); append("],")
+        append("\"settlements\":["); append(snapshot.settlements.joinToString(",") { "{\"id\":\"${it.id}\",\"entityType\":\"${it.entityType}\",\"entityId\":\"${it.entityId}\",\"financialEventId\":\"${it.financialEventId}\"}" }); append("],")
+        append("\"simpleInvestments\":["); append(snapshot.simpleInvestments.joinToString(",") { "{\"id\":\"${it.id}\",\"title\":\"${escape(it.title)}\",\"currentEstimatedValueMinor\":${it.currentEstimatedValueMinor},\"status\":\"${it.status}\"}" }); append("],")
+        append("\"incomeSources\":["); append(snapshot.incomeSources.joinToString(",") { "{\"id\":${q(it.id)},\"name\":${q(it.name)},\"sourceType\":${q(it.sourceType)},\"status\":${q(it.status)}}" }); append("],")
+        append(",\"calendarItems\":["); append(snapshot.calendarItems.joinToString(",") { "{\"id\":${q(it.id)},\"kind\":${q(it.kind)},\"title\":${q(it.title)},\"dueAtEpochMillis\":${it.dueAtEpochMillis},\"status\":${q(it.status)}}" }); append("],")
+        append("\"documentLinks\":["); append(snapshot.documentLinks.joinToString(",") { "{\"id\":${q(it.id)},\"documentId\":${q(it.documentId)},\"entityType\":${q(it.entityType)},\"entityId\":${q(it.entityId)}}" }); append("],")
+        append("\"utilityBills\":["); append(snapshot.utilityBills.joinToString(",") { "{\"id\":${q(it.id)},\"name\":${q(it.name)},\"category\":${q(it.category)},\"status\":${q(it.status)}}" }); append("],")
+        append("\"billOccurrences\":["); append(snapshot.billOccurrences.joinToString(",") { "{\"id\":${q(it.id)},\"profileId\":${q(it.profileId)},\"billingYear\":${it.billingYear},\"billingMonth\":${it.billingMonth},\"status\":${q(it.status)},\"amountMinor\":${it.amountMinor}}" }); append("],")
+        append("\"payments\":["); append(snapshot.payments.joinToString(",") { "{\"id\":${q(it.id)},\"occurrenceId\":${q(it.occurrenceId)},\"amountPaidMinor\":${it.amountPaidMinor},\"paymentDateEpochDay\":${it.paymentDateEpochDay}}" }); append("],")
+        append("\"billAttachments\":["); append(snapshot.billAttachments.joinToString(",") { "{\"id\":${q(it.id)},\"linkedId\":${q(it.linkedId)},\"linkedEntityType\":${q(it.linkedEntityType)},\"mimeType\":${q(it.mimeType)},\"fileHash\":${it.fileHash?.let(::q) ?: "null"}}" }); append("]}")
     }
 
     fun csvEvents(snapshot: ExportSnapshot): String = buildString {
@@ -72,6 +114,7 @@ class DataExportService {
         snapshot.taxItems.forEach { appendLine(listOf(it.id, it.taxYearId, it.taxEventType, it.dateEpochDay, it.grossAmountMinor ?: 0, it.currency, it.reviewState, it.evidenceState).joinToString(",")) }
     }
 
-    private fun escape(value: String) = value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n")
+    private fun q(value: String) = "\"${escape(value)}\""
+    private fun escape(value: String) = value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r")
     private fun csv(value: String) = if (value.any { it == ',' || it == '"' || it == '\n' }) "\"${value.replace("\"", "\"\"")}\"" else value
 }

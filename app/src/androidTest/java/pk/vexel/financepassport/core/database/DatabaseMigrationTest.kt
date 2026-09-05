@@ -218,7 +218,7 @@ class DatabaseMigrationTest {
 
     @Test
     fun migrateV14ToV15AddsContextsAndBillDefaults() {
-        helper.createDatabase("migration-v14-pay", 14).apply { execSQL("INSERT INTO payment_records (id, occurrenceId, amountPaidMinor, paymentDateEpochDay, paymentMode, createdAtEpochMillis, updatedAtEpochMillis) VALUES (pr1, occ1, 100, 1, Cash, 1, 1)"); close() }
+        helper.createDatabase("migration-v14-pay", 14).apply { execSQL("INSERT INTO payment_records (id, occurrenceId, amountPaidMinor, paymentDateEpochDay, paymentMode, createdAtEpochMillis, updatedAtEpochMillis) VALUES ('pr1', 'occ1', 100, 1, 'Cash', 1, 1)"); close() }
         helper.runMigrationsAndValidate("migration-v14-pay", 15, true, DatabaseProvider.MIGRATION_14_15).close()
         helper.createDatabase("migration-v14", 14).apply {
             execSQL("INSERT INTO user_profiles (id, displayName, baseCurrency, createdAtEpochMillis, updatedAtEpochMillis) VALUES ('user', 'Demo', 'PKR', 1, 1)")
@@ -245,5 +245,22 @@ class DatabaseMigrationTest {
         assert(billCursor.isNull(1))
         assert(billCursor.isNull(2))
         billCursor.close()
+    }
+
+    @Test
+    fun migrateV16ToV17AddsPositionSnapshotsWithoutChangingExistingRows() {
+        helper.createDatabase("migration-v16", 16).apply {
+            execSQL("INSERT INTO wealth_snapshots (id, taxYearId, kind, snapshotDateEpochDay, liquidFundsMinor, investmentsValueMinor, assetsValueMinor, receivablesValueMinor, liabilitiesValueMinor, netWealthMinor, createdAtEpochMillis) VALUES ('legacy', 'PK-2026', 'OPENING', 1, 10, 20, 30, 40, 5, 95, 1)")
+            close()
+        }
+        helper.runMigrationsAndValidate("migration-v16", 17, true, MIGRATION_16_17).use { database ->
+            database.query("SELECT netWealthMinor FROM wealth_snapshots WHERE id = 'legacy'").use { cursor ->
+                check(cursor.moveToFirst() && cursor.getLong(0) == 95L)
+            }
+            database.execSQL("INSERT INTO position_snapshots (id, kind, snapshotDateEpochDay, liquidFundsMinor, investmentsValueMinor, assetsValueMinor, receivablesValueMinor, liabilitiesValueMinor, netWorthMinor, createdAtEpochMillis) VALUES ('position-1', 'MANUAL', 2, 1, 2, 3, 4, 5, 5, 2)")
+            database.query("SELECT COUNT(*) FROM position_snapshots").use { cursor ->
+                check(cursor.moveToFirst() && cursor.getInt(0) == 1)
+            }
+        }
     }
 }

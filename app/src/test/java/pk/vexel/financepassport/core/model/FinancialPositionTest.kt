@@ -6,6 +6,7 @@ import pk.vexel.financepassport.core.database.AssetEntity
 import pk.vexel.financepassport.core.database.InvestmentEventEntity
 import pk.vexel.financepassport.core.database.LiabilityEntity
 import pk.vexel.financepassport.core.database.ReceivableEntity
+import pk.vexel.financepassport.core.database.SimpleInvestmentEntity
 
 class FinancialPositionTest {
     @Test fun deterministicFixtureProducesExpectedNetWorth() {
@@ -44,5 +45,23 @@ class FinancialPositionTest {
     @Test fun emptyPortfolioIsZeroNetWorth() {
         val position = calculateFinancialPosition(0, 0, emptyList(), emptyList(), emptyList(), emptyList(), 0, 0)
         assertEquals(0L, position.netWorthMinor)
+    }
+
+    @Test fun excludedAndPartiallyOwnedAssetsUseDerivedContribution() {
+        val assets = listOf(
+            AssetEntity("included", "PROPERTY", "Shared home", 1, 20_000_000, 20_000_000, "PKR", 50, null, null, "ACTIVE"),
+            AssetEntity("excluded", "VEHICLE", "Private vehicle", 1, 2_000_000, 2_000_000, "PKR", 100, null, null, "ACTIVE", includeInNetWorth = false),
+        )
+        val position = calculateFinancialPosition(0, 0, assets, emptyList(), emptyList(), emptyList(), 0, 0)
+        assertEquals(10_000_000L, position.assetsValueMinor)
+    }
+
+    @Test fun simpleInvestmentValueIsIncludedWithoutIncomeOrExpenseDoubleCounting() {
+        val simple = listOf(SimpleInvestmentEntity("td", "Term Deposit", "TERM_DEPOSIT", acquisitionDateEpochDay = 1, principalInvestedMinor = 500_000, currentEstimatedValueMinor = 525_000))
+        val position = calculateFinancialPosition(1_000_000, 0, emptyList(), emptyList(), emptyList(), emptyList(), 0, 0, simple)
+        assertEquals(525_000L, position.investmentsValueMinor)
+        assertEquals(1_525_000L, position.netWorthMinor)
+        assertEquals(0L, position.monthlyIncomeMinor)
+        assertEquals(0L, position.monthlyExpenseMinor)
     }
 }

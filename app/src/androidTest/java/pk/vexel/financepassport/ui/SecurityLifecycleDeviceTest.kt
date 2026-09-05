@@ -18,15 +18,19 @@ import android.Manifest
 import android.os.Build
 import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.rule.GrantPermissionRule
 import java.util.UUID
 import org.junit.Rule
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.Description
 import org.junit.runner.RunWith
 import org.junit.rules.TestRule
 import org.junit.runners.model.Statement
 import pk.vexel.financepassport.MainActivity
+import pk.vexel.financepassport.PassportApplication
+import pk.vexel.financepassport.core.security.PinStore
 
 /**
  * Device-lifecycle coverage: inactivity relock, deleteAllData returning to onboarding without a
@@ -56,6 +60,14 @@ class SecurityLifecycleDeviceTest {
         override fun apply(base: Statement, description: Description): Statement = if (Build.VERSION.SDK_INT >= 33) {
             GrantPermissionRule.grant(Manifest.permission.POST_NOTIFICATIONS).apply(base, description)
         } else base
+    }
+
+    @Before
+    fun resetStateForEachTest() {
+        val context = ApplicationProvider.getApplicationContext<PassportApplication>()
+        context.preferences.clear()
+        PinStore(context).clear()
+        composeRule.waitForIdle()
     }
 
     @Test
@@ -161,9 +173,6 @@ class SecurityLifecycleDeviceTest {
     private fun dismissOnboardingIfPresent() {
         while (composeRule.onAllNodesWithTag("onboarding-next").fetchSemanticsNodes().isNotEmpty()) {
             composeRule.onNodeWithTag("onboarding-next").performClick()
-        }
-        if (composeRule.onAllNodesWithTag("setup-start-empty").fetchSemanticsNodes().isNotEmpty()) {
-            composeRule.onNodeWithTag("setup-start-empty").performClick()
         }
     }
 

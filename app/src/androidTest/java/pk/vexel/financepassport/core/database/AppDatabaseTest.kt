@@ -22,6 +22,57 @@ class AppDatabaseTest {
 
     @After fun closeDatabase() = database.close()
 
+    @Test
+    fun normalizedRecurringExpectationIsNotMoneyAndConfirmationIsIdempotent() = runBlocking {
+        val repository = FinanceRepository(database)
+        repository.addAccount("Cash", "CASH", 100_000)
+        val account = database.accountDao().getAll().single()
+        val template = RecurringTemplateEntity(
+            id = "salary-template", title = "Variable clinic income", eventType = "INCOME",
+            amountMode = "VARIABLE", expectedAmountMinor = null, currency = "PKR", frequency = "MONTHLY",
+            startDateEpochDay = 20_000, defaultAccountId = account.id, createdAtEpochMillis = 1, updatedAtEpochMillis = 1,
+        )
+        val occurrence = repository.createRecurringTemplate(template)
+        assertEquals(0, database.financialEventDao().getAll().size)
+        val eventId = repository.confirmExpectedOccurrence(occurrence.id, actualAmountMinor = 18_000)
+        assertEquals(eventId, repository.confirmExpectedOccurrence(occurrence.id, actualAmountMinor = 99_000))
+        assertEquals(1, database.financialEventDao().getAll().size)
+        assertEquals("CONFIRMED", database.expectedOccurrenceDao().getById(occurrence.id)?.status)
+        assertEquals(18_000L, database.financialEventDao().getById(eventId)?.amountMinor)
+    }
+
+    @Test
+    fun liabilityInstallmentSeparatesCashPrincipalAndFinancingCost() = runBlocking {
+        val repository = FinanceRepository(database)
+        repository.addAccount("HBL", "BANK", 200_000)
+        val account = database.accountDao().getAll().single()
+        repository.addLiability(context, "Car loan", "CAR_FINANCING", 80_000)
+        val liability = database.wealthDao().getAllLiabilities().single()
+        repository.recordLiabilityPayment(liability.id, 20_000, account.id, principalAmountMinor = 15_000, financingCostMinor = 5_000)
+        assertEquals(65_000L, database.wealthDao().getLiabilityById(liability.id)?.outstandingAmountMinor)
+        assertEquals(-20_000L, database.financialEventDao().getAll().filter { it.eventType == "FINANCING" }.single().cashEffectMinor)
+        assertEquals(5_000L, database.financialEventDao().getAll().filter { it.eventType == "EXPENSE" }.single().amountMinor)
+        assertEquals(-20_000L, database.financialEventDao().observeAccountMovement(account.id).first())
+    }
+
+    @Test
+    fun incomeDueReceiptCreatesIncomeButMoneyLentRepaymentDoesNot() = runBlocking {
+        val repository = FinanceRepository(database)
+        repository.addAccount("HBL", "BANK", 0)
+        val account = database.accountDao().getAll().single()
+        repository.addReceivable(context, "Lecture", "University", 10_000)
+        val incomeDue = database.receivableDao().getAll().single().copy(receivableType = "INCOME_DUE", activityDateEpochDay = 20_000)
+        database.receivableDao().upsert(incomeDue)
+        repository.recordReceivablePayment(incomeDue.id, 6_000, account.id)
+        assertEquals("INCOME", database.financialEventDao().getAll().single().eventType)
+        assertEquals(4_000L, database.receivableDao().getById(incomeDue.id)?.outstandingAmountMinor)
+        val lent = incomeDue.copy(id = "lent", title = "Money lent", receivableType = "MONEY_LENT", originalAmountMinor = 5_000, outstandingAmountMinor = 5_000)
+        database.receivableDao().upsert(lent)
+        repository.recordReceivablePayment(lent.id, 5_000, account.id)
+        assertEquals(1, database.financialEventDao().getAll().count { it.eventType == "INCOME" })
+        assertEquals(5_000L, database.financialEventDao().getAll().single { it.eventType == "FINANCING" }.cashEffectMinor)
+    }
+
     @Test fun transferLinkAndBothLedgerRowsCommitTogether() = runBlocking {
         val now = 1L
         val source = FinancialEventEntity("source", "TRANSFER", 1, -1000, "PKR", "a", null, null, "Move", null, "NOT_RELEVANT", null, now, now)

@@ -23,8 +23,8 @@ import org.junit.runner.RunWith
 import pk.vexel.financepassport.MainActivity
 
 /**
- * Confirms Sprint 24's unified shell exposes Home / Bills / Money / History while later finance
- * workspaces remain outside primary navigation.
+ * Confirms the unified shell exposes the core financial surfaces, including the F/G/H position,
+ * calendar, and evidence workspaces.
  */
 @RunWith(AndroidJUnit4::class)
 class NavigationSmokeTest {
@@ -46,7 +46,7 @@ class NavigationSmokeTest {
     }
 
     @Test
-    fun homeBillsMoneyAndHistoryAreReachableAndDeferredSurfacesAreAbsent() {
+    fun coreAndPositionCalendarVaultSurfacesAreReachable() {
         unlockIfNeeded()
 
         composeRule.onNodeWithText("Bills", useUnmergedTree = true).performClick()
@@ -61,12 +61,12 @@ class NavigationSmokeTest {
         composeRule.onNodeWithText("Home", useUnmergedTree = true).performClick()
         composeRule.onNodeWithText("Dashboard").assertIsDisplayed()
 
-        listOf("Wealth", "Tax & Records", "Tax", "Vault", "Net Worth", "Investments", "Loans", "Receivables", "Goals").forEach { hidden ->
-            assertTrue(
-                "'$hidden' must not be reachable from the main navigation",
-                composeRule.onAllNodesWithText(hidden, useUnmergedTree = true).fetchSemanticsNodes().isEmpty(),
-            )
-        }
+        composeRule.onNodeWithText("Position", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithText("Financial Position").assertIsDisplayed()
+        composeRule.onNodeWithText("Calendar", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithText("Financial Calendar").assertIsDisplayed()
+        composeRule.onNodeWithText("Vault", useUnmergedTree = true).performClick()
+        composeRule.onNodeWithText("Evidence Vault").assertIsDisplayed()
     }
 
     private fun dismissOnboardingIfPresent() {

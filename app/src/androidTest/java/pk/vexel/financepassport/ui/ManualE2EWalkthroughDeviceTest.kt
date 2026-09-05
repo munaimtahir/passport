@@ -15,8 +15,10 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.core.app.ApplicationProvider
 import androidx.test.rule.GrantPermissionRule
 import java.util.UUID
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.Description
@@ -24,6 +26,8 @@ import org.junit.runner.RunWith
 import org.junit.rules.TestRule
 import org.junit.runners.model.Statement
 import pk.vexel.financepassport.MainActivity
+import pk.vexel.financepassport.PassportApplication
+import pk.vexel.financepassport.core.security.PinStore
 
 /**
  * Chains onboarding through registering a utility bill, paying it, and confirming the paid state
@@ -45,6 +49,16 @@ class ManualE2EWalkthroughDeviceTest {
         override fun apply(base: Statement, description: Description): Statement = if (Build.VERSION.SDK_INT >= 33) {
             GrantPermissionRule.grant(Manifest.permission.POST_NOTIFICATIONS).apply(base, description)
         } else base
+    }
+
+    @Before
+    fun resetStateForEachTest() {
+        val context = ApplicationProvider.getApplicationContext<PassportApplication>()
+        context.preferences.clear()
+        PinStore(context).clear()
+        // clearPackageData/orchestrator already provides a fresh process and data set. Calling
+        // recreate here races a cold activity launch on API 36 and can yield a null scenario.
+        composeRule.waitForIdle()
     }
 
     @Test
@@ -76,6 +90,9 @@ class ManualE2EWalkthroughDeviceTest {
         // clickable modifier merges descendant semantics, so these must query the merged tree
         // (not useUnmergedTree) for the click action to resolve to the card, not the text.
         composeRule.onNodeWithText(billName).performClick()
+        // The statistics card can be below the initial dialog viewport on API 36; scroll it into
+        // view before asserting visibility so this is a layout-safe UI check.
+        composeRule.onNodeWithTag("profile-details-scroll", useUnmergedTree = true).performScrollToNode(hasText("Connection Statistics"))
         waitFor("Connection Statistics")
         val monthLabel = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("MMMM yyyy"))
         // The Billing History row sits below Connection Statistics in a scrollable dialog body,
@@ -129,7 +146,11 @@ class ManualE2EWalkthroughDeviceTest {
         var lastError: Throwable? = null
         while (System.currentTimeMillis() < deadline) {
             try {
-                composeRule.onNodeWithText(text, useUnmergedTree = true).assertIsDisplayed()
+                composeRule.onAllNodesWithText(text, useUnmergedTree = true)
+                    .fetchSemanticsNodes()
+                    .firstOrNull()
+                    ?.let { composeRule.onAllNodesWithText(text, useUnmergedTree = true)[0].assertIsDisplayed() }
+                    ?: throw AssertionError("No visible node for '$text'")
                 return
             } catch (error: Throwable) {
                 lastError = error

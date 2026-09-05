@@ -4,6 +4,7 @@ import pk.vexel.financepassport.core.database.AssetEntity
 import pk.vexel.financepassport.core.database.InvestmentEventEntity
 import pk.vexel.financepassport.core.database.LiabilityEntity
 import pk.vexel.financepassport.core.database.ReceivableEntity
+import pk.vexel.financepassport.core.database.SimpleInvestmentEntity
 
 /**
  * The single canonical financial position, in PKR minor units. This is the one source of truth
@@ -34,6 +35,11 @@ data class FinancialPosition(
 fun calculateInvestmentsValueMinor(events: List<InvestmentEventEntity>): Long =
     events.groupBy { it.securityName }.entries.sumOf { (name, group) -> calculateInvestmentPosition(name, group).costBasisMinor }
 
+/** Current position value for Wave E's simple holdings; valuations are not financial events. */
+fun calculateSimpleInvestmentsValueMinor(investments: List<SimpleInvestmentEntity>): Long =
+    investments.filter { it.status == "ACTIVE" || it.status == "MATURED" }
+        .sumOf { it.currentEstimatedValueMinor }
+
 fun calculateFinancialPosition(
     accountsOpeningBalanceMinor: Long,
     accountsMovementMinor: Long,
@@ -43,10 +49,14 @@ fun calculateFinancialPosition(
     receivables: List<ReceivableEntity>,
     monthlyIncomeMinor: Long,
     monthlyExpenseMinor: Long,
+    simpleInvestments: List<SimpleInvestmentEntity> = emptyList(),
 ): FinancialPosition = FinancialPosition(
     liquidFundsMinor = accountsOpeningBalanceMinor + accountsMovementMinor,
-    investmentsValueMinor = calculateInvestmentsValueMinor(investments),
-    assetsValueMinor = assets.sumOf { it.currentEstimatedValueMinor },
+    // Legacy investment events remain supported for historical data; normalized simple
+    // positions are added as a separate source and are never counted as income/expense.
+    investmentsValueMinor = calculateInvestmentsValueMinor(investments) + calculateSimpleInvestmentsValueMinor(simpleInvestments),
+    assetsValueMinor = assets.filter { it.status == "ACTIVE" && it.includeInNetWorth }
+        .sumOf { it.currentEstimatedValueMinor * it.ownershipPercent / 100L },
     receivablesValueMinor = receivables.sumOf { it.outstandingAmountMinor },
     liabilitiesValueMinor = liabilities.sumOf { it.outstandingAmountMinor },
     monthlyIncomeMinor = monthlyIncomeMinor,

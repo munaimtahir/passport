@@ -19,6 +19,8 @@ import pk.vexel.financepassport.core.model.calculateGoalProgress
 import pk.vexel.financepassport.core.model.advanceRecurringDueDate
 import pk.vexel.financepassport.core.model.UtilityCategory
 import pk.vexel.financepassport.core.model.toYearMonth
+import pk.vexel.financepassport.core.model.CalendarProjectionSource
+import pk.vexel.financepassport.core.model.calendarProjection
 import java.time.Instant
 import java.util.UUID
 import pk.vexel.financepassport.core.export.ExportSnapshot
@@ -223,12 +225,14 @@ class FinanceRepository(private val db: AppDatabase) {
     val goals: Flow<List<GoalEntity>> = db.goalDao().observeAll()
     val officialRecords: Flow<List<OfficialRecordEntity>> = db.officialRecordDao().observeAll()
     val calendarItems: Flow<List<CalendarItemEntity>> = db.calendarDao().observeOpen()
+    val positionSnapshots: Flow<List<PositionSnapshotEntity>> = db.positionSnapshotDao().observeAll()
     val documents: Flow<List<DocumentEntity>> = db.documentDao().observeAll()
     val drafts: Flow<List<TaxAnnualDraftEntity>> = db.taxDraftDao().observeDrafts()
     val taxIssues: Flow<List<TaxIssueEntity>> = db.taxIssueDao().observeAll()
     val reconciliations: Flow<List<WealthReconciliationEntity>> = db.reconciliationDao().observeAll()
     val taxYears: Flow<List<TaxYearEntity>> = db.taxYearDao().observeAll()
     val recurringItems: Flow<List<RecurringItemEntity>> = db.recurringItemDao().observeActive()
+    val simpleInvestments: Flow<List<SimpleInvestmentEntity>> = db.simpleInvestmentDao().observeAll()
     val budgets: Flow<List<BudgetEntity>> = db.budgetDao().observeActive()
     val totals: Flow<Pair<Money, Money>> = combine(db.financialEventDao().observeIncomeMinor(), db.financialEventDao().observeExpenseMinor()) { income, expense ->
         Money(MinorUnits(income), "PKR") to Money(MinorUnits(expense), "PKR")
@@ -255,7 +259,7 @@ class FinanceRepository(private val db: AppDatabase) {
         ) { accounts, movement, monthlyIncome, monthlyExpense ->
             AccountsSnapshot(accounts.sumOf { it.openingBalanceMinor }, movement, monthlyIncome, monthlyExpense)
         }.combine(
-            combine(db.wealthDao().observeAssets(), db.wealthDao().observeLiabilities(), db.investmentDao().observeAll(), db.receivableDao().observeAll(), ::WealthSnapshot),
+            combine(db.wealthDao().observeAssets(), db.wealthDao().observeLiabilities(), db.investmentDao().observeAll(), db.receivableDao().observeAll(), db.simpleInvestmentDao().observeAll(), ::WealthSnapshot),
         ) { accountsSnapshot, wealthSnapshot ->
             calculateFinancialPosition(
                 accountsSnapshot.openingBalanceMinor,
@@ -266,12 +270,68 @@ class FinanceRepository(private val db: AppDatabase) {
                 wealthSnapshot.receivables,
                 accountsSnapshot.monthlyIncomeMinor,
                 accountsSnapshot.monthlyExpenseMinor,
+                wealthSnapshot.simpleInvestments,
             )
         }
     }
 
     private data class AccountsSnapshot(val openingBalanceMinor: Long, val movementMinor: Long, val monthlyIncomeMinor: Long, val monthlyExpenseMinor: Long)
-    private data class WealthSnapshot(val assets: List<AssetEntity>, val liabilities: List<LiabilityEntity>, val investments: List<InvestmentEventEntity>, val receivables: List<ReceivableEntity>)
+    private data class WealthSnapshot(val assets: List<AssetEntity>, val liabilities: List<LiabilityEntity>, val investments: List<InvestmentEventEntity>, val receivables: List<ReceivableEntity>, val simpleInvestments: List<SimpleInvestmentEntity>)
+
+    suspend fun recordPositionSnapshot(kind: String = "MANUAL", date: LocalDate = LocalDate.now()): PositionSnapshotEntity {
+        require(kind == "MANUAL" || kind == "MONTHLY") { "Snapshot kind must be MANUAL or MONTHLY" }
+        val position = financialPosition.first()
+        return PositionSnapshotEntity(
+            UUID.randomUUID().toString(), kind, date.toEpochDay(), position.liquidFundsMinor,
+            position.investmentsValueMinor, position.assetsValueMinor, position.receivablesValueMinor,
+            position.liabilitiesValueMinor, position.netWorthMinor, Instant.now().toEpochMilli(),
+        ).also { db.positionSnapshotDao().insert(it) }
+    }
+
+    /**
+     * Rebuilds only source-backed calendar rows. The source tables remain authoritative and this
+     * operation is safe to repeat after relaunch or a worker retry.
+     */
+    suspend fun reconcileCalendarProjection() {
+        val today = LocalDate.now().toEpochDay()
+        val sources = buildList {
+            db.monthlyBillOccurrenceDao().getAll().filter { it.status !in setOf("Paid", "Skipped") }.forEach {
+                add(CalendarProjectionSource("BILL", it.id, "Bill due", it.expectedDueDateEpochDay))
+            }
+            db.recurringItemDao().getAll().filter { it.status == "ACTIVE" }.forEach {
+                add(CalendarProjectionSource("RECURRING", it.id, it.title, it.nextDueDateEpochDay))
+            }
+            db.expectedOccurrenceDao().getAll().filter { it.status !in setOf("CONFIRMED", "SKIPPED") }.forEach {
+                add(CalendarProjectionSource("OCCURRENCE", it.id, "Recurring occurrence", it.dueDateEpochDay))
+            }
+            db.wealthDao().getAllLiabilities().filter { it.status == "ACTIVE" && it.outstandingAmountMinor > 0 && it.dueDateEpochDay != null }.forEach {
+                add(CalendarProjectionSource("LIABILITY", it.id, it.title, it.dueDateEpochDay!!))
+            }
+            db.receivableDao().getAll().filter { it.status == "ACTIVE" && it.outstandingAmountMinor > 0 && it.dueDateEpochDay != null }.forEach {
+                add(CalendarProjectionSource("RECEIVABLE", it.id, it.title, it.dueDateEpochDay!!))
+            }
+            db.simpleInvestmentDao().getAll().filter { it.status == "ACTIVE" && it.maturityDateEpochDay != null }.forEach {
+                add(CalendarProjectionSource("MATURITY", it.id, it.title, it.maturityDateEpochDay!!))
+            }
+            db.documentDao().getAll().filter { it.expiryDateEpochDay != null }.forEach {
+                add(CalendarProjectionSource("DOCUMENT_EXPIRY", it.id, it.title, it.expiryDateEpochDay!!))
+            }
+            db.officialRecordDao().getAll().filter { it.status == "ACTIVE" && it.expiryDateEpochDay != null }.forEach {
+                add(CalendarProjectionSource("RECORD_EXPIRY", it.id, it.title, it.expiryDateEpochDay!!))
+            }
+        }
+        val projected = calendarProjection(sources, today)
+        val activeIds = projected.map { it.stableId }.toSet()
+        db.withTransaction {
+            db.calendarDao().getAll().filter { it.kind.startsWith("SOURCE_") && it.id !in activeIds }.forEach {
+                db.calendarDao().updateStatus(it.id, "CANCELLED")
+            }
+            projected.forEach { source ->
+                val dueAt = LocalDate.ofEpochDay(source.dueDateEpochDay).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                db.calendarDao().upsert(CalendarItemEntity(source.stableId, source.title, source.kind, dueAt, source.sourceId, "OPEN", source.reminderMinutesBefore))
+            }
+        }
+    }
 
     fun accountMovement(accountId: String): Flow<Long> = db.financialEventDao().observeAccountMovement(accountId)
 
@@ -343,6 +403,13 @@ class FinanceRepository(private val db: AppDatabase) {
         db.wealthDao().updateAssetValue(id, valueMinor)
     }
 
+    suspend fun updateAssetPosition(id: String, valueMinor: Long, ownershipPercent: Int, includeInNetWorth: Boolean) {
+        require(valueMinor >= 0) { "Asset valuation cannot be negative" }
+        require(ownershipPercent in 0..100) { "Ownership must be between 0 and 100 percent" }
+        require(db.wealthDao().getAssetById(id) != null) { "Asset not found" }
+        db.wealthDao().updatePosition(id, valueMinor, ownershipPercent, includeInNetWorth, LocalDate.now().toEpochDay())
+    }
+
     suspend fun disposeAsset(id: String, valueMinor: Long) {
         require(valueMinor >= 0) { "Disposal value cannot be negative" }
         require(db.wealthDao().getAssetById(id) != null) { "Asset not found" }
@@ -382,6 +449,48 @@ class FinanceRepository(private val db: AppDatabase) {
         db.wealthDao().updateLiabilityOutstanding(id, remaining, if (remaining == 0L) "SETTLED" else "ACTIVE")
     }
 
+    /** Records borrowed principal as a signed financing movement, never as income. */
+    suspend fun recordBorrowedPrincipal(id: String, accountId: String, amountMinor: Long, date: LocalDate = LocalDate.now()) {
+        require(amountMinor > 0) { "Borrowed principal must be positive" }
+        require(db.accountDao().getById(accountId)?.status == "ACTIVE") { "Choose an active account" }
+        val liability = db.wealthDao().getLiabilityById(id) ?: error("Liability not found")
+        val now = Instant.now().toEpochMilli()
+        val event = FinancialEventEntity(id = UUID.randomUUID().toString(), eventType = FinancialEventType.FINANCING.name, dateEpochDay = date.toEpochDay(), amountMinor = amountMinor, currency = "PKR", accountId = accountId, contextId = liability.contextId, category = null, description = "${liability.title} — principal received", notes = null, taxRelevance = "NOT_RELEVANT", deletedAtEpochMillis = null, createdAtEpochMillis = now, updatedAtEpochMillis = now, cashEffectMinor = amountMinor)
+        db.withTransaction {
+            db.financialEventDao().upsert(event)
+            db.wealthDao().updateLiabilityOutstanding(id, liability.outstandingAmountMinor + amountMinor, "ACTIVE")
+            db.settlementEventDao().upsert(SettlementEventEntity(UUID.randomUUID().toString(), "LIABILITY", id, event.id, amountMinor, 0, date.toEpochDay()))
+        }
+    }
+
+    /** Records one loan installment as one cash movement plus a non-cash expense component. */
+    suspend fun recordLiabilityPayment(
+        id: String,
+        amountMinor: Long,
+        accountId: String,
+        principalAmountMinor: Long = amountMinor,
+        financingCostMinor: Long = 0,
+        date: LocalDate = LocalDate.now(),
+    ) {
+        require(amountMinor > 0 && principalAmountMinor >= 0 && financingCostMinor >= 0 && principalAmountMinor + financingCostMinor == amountMinor) { "Installment split is invalid" }
+        require(db.accountDao().getById(accountId)?.status == "ACTIVE") { "Choose an active account" }
+        val liability = db.wealthDao().getLiabilityById(id) ?: error("Liability not found")
+        require(principalAmountMinor <= liability.outstandingAmountMinor) { "Principal exceeds outstanding liability" }
+        val now = Instant.now().toEpochMilli()
+        val groupId = UUID.randomUUID().toString()
+        val cashEvent = FinancialEventEntity(id = UUID.randomUUID().toString(), eventType = FinancialEventType.FINANCING.name, dateEpochDay = date.toEpochDay(), amountMinor = amountMinor, currency = "PKR", accountId = accountId, contextId = liability.contextId, category = null, description = "${liability.title} — installment", notes = null, taxRelevance = "NOT_RELEVANT", deletedAtEpochMillis = null, createdAtEpochMillis = now, updatedAtEpochMillis = now, groupId = groupId, cashEffectMinor = -amountMinor)
+        val costEvent = financingCostMinor.takeIf { it > 0 }?.let {
+            FinancialEventEntity(id = UUID.randomUUID().toString(), eventType = FinancialEventType.EXPENSE.name, dateEpochDay = date.toEpochDay(), amountMinor = it, currency = "PKR", accountId = accountId, contextId = liability.contextId, category = "Financing cost", description = "${liability.title} — financing cost", notes = null, taxRelevance = "UNKNOWN", deletedAtEpochMillis = null, createdAtEpochMillis = now, updatedAtEpochMillis = now, groupId = groupId, cashEffectMinor = 0)
+        }
+        db.withTransaction {
+            db.financialEventDao().upsert(cashEvent)
+            costEvent?.let { db.financialEventDao().upsert(it) }
+            val remaining = liability.outstandingAmountMinor - principalAmountMinor
+            db.wealthDao().updateLiabilityOutstanding(id, remaining, if (remaining == 0L) "SETTLED" else "ACTIVE")
+            db.settlementEventDao().upsert(SettlementEventEntity(UUID.randomUUID().toString(), "LIABILITY", id, cashEvent.id, principalAmountMinor, financingCostMinor, date.toEpochDay()))
+        }
+    }
+
     suspend fun addInvestmentEvent(securityName: String, type: String, amountMinor: Long, quantityMinor: Long = 0, feesMinor: Long = 0, taxWithheldMinor: Long = 0, accountLabel: String = "Manual") {
         require(amountMinor >= 0 && quantityMinor >= 0 && feesMinor >= 0 && taxWithheldMinor >= 0)
         val normalizedAccountLabel = accountLabel.trim().takeIf { it.isNotEmpty() } ?: "Manual"
@@ -397,6 +506,23 @@ class FinanceRepository(private val db: AppDatabase) {
                 context, "receivable-due-$id", "RECEIVABLE_DUE", trimmedTitle, id, dueDate.toEpochDay(),
                 headline = "$trimmedTitle is due", body = "Follow up with ${counterparty.trim()} about this receivable.",
             )
+        }
+    }
+
+    /** Settles a receivable and classifies only income-due receipts as income. */
+    suspend fun recordReceivablePayment(id: String, amountMinor: Long, accountId: String, date: LocalDate = LocalDate.now()) {
+        val current = db.receivableDao().getById(id) ?: error("Receivable not found")
+        require(amountMinor > 0 && amountMinor <= current.outstandingAmountMinor) { "Payment exceeds outstanding amount" }
+        require(db.accountDao().getById(accountId)?.status == "ACTIVE") { "Choose an active account" }
+        val now = Instant.now().toEpochMilli()
+        val isIncome = current.receivableType == "INCOME_DUE"
+        val event = FinancialEventEntity(id = UUID.randomUUID().toString(), eventType = if (isIncome) FinancialEventType.INCOME.name else FinancialEventType.FINANCING.name, dateEpochDay = date.toEpochDay(), amountMinor = amountMinor, currency = "PKR", accountId = accountId, contextId = current.contextId, category = null, description = "${current.title} — received", notes = null, taxRelevance = if (isIncome) "UNKNOWN" else "NOT_RELEVANT", deletedAtEpochMillis = null, createdAtEpochMillis = now, updatedAtEpochMillis = now, cashEffectMinor = if (isIncome) null else amountMinor)
+        db.withTransaction {
+            db.financialEventDao().upsert(event)
+            val outstanding = current.outstandingAmountMinor - amountMinor
+            db.receivableDao().upsert(current.copy(outstandingAmountMinor = outstanding, status = if (outstanding == 0L) "SETTLED" else "OPEN", receivedDateEpochDay = date.toEpochDay()))
+            db.settlementEventDao().upsert(SettlementEventEntity(UUID.randomUUID().toString(), "RECEIVABLE", id, event.id, amountMinor, 0, date.toEpochDay()))
+            if (isIncome) insertTaxCandidateForIncome(event, now)
         }
     }
 
@@ -457,7 +583,7 @@ class FinanceRepository(private val db: AppDatabase) {
     }
 
     suspend fun updateCalendarStatus(context: Context, id: String, status: String) {
-        require(status in setOf("COMPLETED", "CANCELLED", "OPEN"))
+        require(status in setOf("COMPLETED", "CANCELLED", "DISMISSED", "OPEN"))
         db.calendarDao().updateStatus(id, status)
         if (status == "OPEN") {
             val item = db.calendarDao().getById(id) ?: return
@@ -499,6 +625,78 @@ class FinanceRepository(private val db: AppDatabase) {
                 if (inserted != -1L) recordInitialMapping(yearId, taxItemId, "financial_event", eventId, date.toEpochDay(), amountMinor, description.trim(), taxEventType, now)
             }
         }
+    }
+
+    private suspend fun insertTaxCandidateForIncome(event: FinancialEventEntity, now: Long) {
+        val yearId = ensureTaxYearExists(LocalDate.ofEpochDay(event.dateEpochDay).year)
+        val taxItemId = UUID.randomUUID().toString()
+        val taxEventType = "EMPLOYMENT_INCOME"
+        val inserted = db.taxItemDao().insertIfAbsent(TaxItemEntity(taxItemId, yearId, "financial_event", event.id, taxEventType, event.dateEpochDay, event.amountMinor, null, event.currency, event.description, "CAPTURED", "REQUESTED", null, now, now))
+        if (inserted != -1L) recordInitialMapping(yearId, taxItemId, "financial_event", event.id, event.dateEpochDay, event.amountMinor, event.description, taxEventType, now)
+    }
+
+    /** Normalized recurring template entry point. Expectations are created without money movement. */
+    suspend fun createRecurringTemplate(template: RecurringTemplateEntity): ExpectedOccurrenceEntity {
+        require(template.title.isNotBlank() && template.intervalCount > 0) { "Recurring template details are invalid" }
+        require(template.eventType == FinancialEventType.INCOME.name || template.eventType == FinancialEventType.EXPENSE.name) { "Recurring templates support income or expense only" }
+        require(template.amountMode == "FIXED" || template.amountMode == "VARIABLE") { "Unsupported recurring amount mode" }
+        require(template.amountMode == "VARIABLE" || (template.expectedAmountMinor != null && template.expectedAmountMinor > 0)) { "Fixed recurring amount is required" }
+        db.recurringTemplateDao().upsert(template)
+        return generateExpectedOccurrence(template.id, template.startDateEpochDay)
+    }
+
+    suspend fun generateExpectedOccurrence(templateId: String, dueDateEpochDay: Long): ExpectedOccurrenceEntity {
+        val template = db.recurringTemplateDao().getById(templateId) ?: error("Recurring template not found")
+        require(template.endDateEpochDay == null || dueDateEpochDay <= template.endDateEpochDay) { "Occurrence is outside template range" }
+        val existing = db.expectedOccurrenceDao().getForTemplateDate(templateId, dueDateEpochDay)
+        if (existing != null) return existing
+        val now = Instant.now().toEpochMilli()
+        return ExpectedOccurrenceEntity(UUID.randomUUID().toString(), templateId, dueDateEpochDay, template.expectedAmountMinor, "UPCOMING", null, now, now).also { db.expectedOccurrenceDao().upsert(it) }
+    }
+
+    /** Idempotent confirmation: the persisted occurrence link is the retry key. */
+    suspend fun confirmExpectedOccurrence(occurrenceId: String, actualAmountMinor: Long? = null, accountId: String? = null, contextId: String? = null, date: LocalDate? = null): String {
+        return db.withTransaction {
+            val occurrence = db.expectedOccurrenceDao().getById(occurrenceId) ?: error("Expected occurrence not found")
+            occurrence.confirmedEventId?.let { return@withTransaction it }
+            val template = db.recurringTemplateDao().getById(occurrence.templateId) ?: error("Recurring template not found")
+            val amount = actualAmountMinor ?: occurrence.expectedAmountMinor
+            require(amount != null && amount > 0) { "Actual amount is required for a variable occurrence" }
+            if (accountId != null) require(db.accountDao().getById(accountId)?.status == "ACTIVE") { "Choose an active account" }
+            val eventId = UUID.randomUUID().toString()
+            val now = Instant.now().toEpochMilli()
+            val event = FinancialEventEntity(eventId, template.eventType, date?.toEpochDay() ?: occurrence.dueDateEpochDay, amount, template.currency, accountId ?: template.defaultAccountId, contextId ?: template.defaultContextId, null, template.title, template.notes, "UNKNOWN", null, now, now, null, template.defaultCategoryId, template.counterparty, template.id, occurrence.id, null, null)
+            db.financialEventDao().upsert(event)
+            if (template.eventType == FinancialEventType.INCOME.name) insertTaxCandidateForIncome(event, now)
+            db.expectedOccurrenceDao().markResolved(occurrence.id, "CONFIRMED", eventId, now)
+            eventId
+        }
+    }
+
+    suspend fun skipExpectedOccurrence(occurrenceId: String) {
+        db.withTransaction {
+            val occurrence = db.expectedOccurrenceDao().getById(occurrenceId) ?: error("Expected occurrence not found")
+            require(occurrence.status != "CONFIRMED") { "Confirmed occurrence cannot be skipped" }
+            db.expectedOccurrenceDao().markResolved(occurrence.id, "SKIPPED", null, Instant.now().toEpochMilli())
+        }
+    }
+
+    suspend fun addSimpleInvestment(investment: SimpleInvestmentEntity, fundingAccountId: String? = null) {
+        require(investment.title.isNotBlank() && investment.principalInvestedMinor >= 0 && investment.currentEstimatedValueMinor >= 0) { "Investment details are invalid" }
+        db.withTransaction {
+            db.simpleInvestmentDao().upsert(investment)
+            if (fundingAccountId != null && investment.principalInvestedMinor > 0) {
+                require(db.accountDao().getById(fundingAccountId)?.status == "ACTIVE") { "Choose an active account" }
+                val now = Instant.now().toEpochMilli()
+                db.financialEventDao().upsert(FinancialEventEntity(id = UUID.randomUUID().toString(), eventType = FinancialEventType.FINANCING.name, dateEpochDay = investment.acquisitionDateEpochDay, amountMinor = investment.principalInvestedMinor, currency = investment.currency, accountId = fundingAccountId, contextId = investment.contextId, category = null, description = "${investment.title} — funded", notes = investment.notes, taxRelevance = "NOT_RELEVANT", deletedAtEpochMillis = null, createdAtEpochMillis = now, updatedAtEpochMillis = now, groupId = investment.id, cashEffectMinor = -investment.principalInvestedMinor))
+            }
+        }
+    }
+
+    suspend fun updateSimpleInvestmentValuation(id: String, valueMinor: Long) {
+        require(valueMinor >= 0) { "Investment valuation cannot be negative" }
+        require(db.simpleInvestmentDao().getById(id) != null) { "Investment not found" }
+        db.simpleInvestmentDao().updateValue(id, valueMinor)
     }
 
     suspend fun addRecurringItem(context: Context, title: String, eventType: FinancialEventType, amountMinor: Long, accountId: String, category: String?, frequency: String, delayDays: Long) {
@@ -576,17 +774,24 @@ class FinanceRepository(private val db: AppDatabase) {
     fun toDomain(entity: FinancialEventEntity) = FinancialEvent(entity.id, runCatching { FinancialEventType.valueOf(entity.eventType) }.getOrDefault(FinancialEventType.ADJUSTMENT), Money(MinorUnits(kotlin.math.abs(entity.amountMinor)), entity.currency), entity.accountId, entity.contextId, entity.dateEpochDay, entity.description)
 
     suspend fun exportSnapshot() = ExportSnapshot(
-        db.accountDao().getAll(), db.financialEventDao().getAll(), db.wealthDao().getAllAssets(), db.wealthDao().getAllLiabilities(),
-        db.taxItemDao().getAll(), db.documentDao().getAll(), db.investmentDao().getAll(), db.receivableDao().getAll(),
-        db.goalDao().getAll(), db.officialRecordDao().getAll(), db.budgetDao().getAll(),
-        db.taxMappingDao().getAll(), db.wealthSnapshotDao().getAll(), db.taxDraftDao().getAll(),
-        db.incomeSourceDao().getAll(),
+        accounts = db.accountDao().getAll(), events = db.financialEventDao().getAll(), assets = db.wealthDao().getAllAssets(), liabilities = db.wealthDao().getAllLiabilities(),
+        taxItems = db.taxItemDao().getAll(), documents = db.documentDao().getAll(), investments = db.investmentDao().getAll(), receivables = db.receivableDao().getAll(),
+        goals = db.goalDao().getAll(), officialRecords = db.officialRecordDao().getAll(), budgets = db.budgetDao().getAll(),
+        taxMappings = db.taxMappingDao().getAll(), wealthSnapshots = db.wealthSnapshotDao().getAll(), taxDrafts = db.taxDraftDao().getAll(),
+        incomeSources = db.incomeSourceDao().getAll(), categories = db.categoryDao().getAll(), recurringTemplates = db.recurringTemplateDao().getAll(),
+        expectedOccurrences = db.expectedOccurrenceDao().getAll(), settlements = db.settlementEventDao().getAll(), simpleInvestments = db.simpleInvestmentDao().getAll(),
+        positionSnapshots = db.positionSnapshotDao().getAll(),
+        contexts = db.financialContextDao().getAll(), calendarItems = db.calendarDao().getAll(),
+        documentLinks = db.documentLinkDao().getAll(), utilityBills = db.utilityBillDao().getAll(),
+        billOccurrences = db.monthlyBillOccurrenceDao().getAll(), payments = db.paymentRecordDao().getAll(),
+        billAttachments = db.billAttachmentDao().getAll(),
     )
 
     suspend fun deleteAllData(context: Context) {
         db.withTransaction { db.clearAllTables() }
         WorkManager.getInstance(context).cancelAllWork()
         File(context.filesDir, "vault").deleteRecursively()
+        File(context.filesDir, "utility_vault").deleteRecursively()
         context.cacheDir.listFiles()?.filter { it.name.startsWith("passport-") || it.name.startsWith("restore-") || it.name.startsWith("passport-preview-") }?.forEach { it.deleteRecursively() }
         // Clear through the live SharedPreferences instances (not raw file deletion) so any
         // already-constructed AppPreferences/PinStore in this process — Context caches one
@@ -633,8 +838,25 @@ class FinanceRepository(private val db: AppDatabase) {
 
     suspend fun linkDocument(documentId: String, entityType: String, entityId: String, purpose: String = "EVIDENCE") {
         require(db.documentDao().getAll().any { it.id == documentId }) { "Document not found" }
+        require(entityType.isNotBlank() && entityId.isNotBlank()) { "A link target is required" }
         db.documentLinkDao().insert(DocumentLinkEntity(UUID.randomUUID().toString(), documentId, entityType, entityId, purpose))
         if (entityType == "tax_item") db.taxItemDao().updateEvidenceState(entityId, "ATTACHED", Instant.now().toEpochMilli())
+    }
+
+    suspend fun unlinkDocument(documentId: String, entityType: String, entityId: String) {
+        require(db.documentDao().getAll().any { it.id == documentId }) { "Document not found" }
+        db.documentLinkDao().deleteLink(documentId, entityType, entityId)
+        if (entityType == "tax_item" && db.documentLinkDao().getForEntity(entityType, entityId).isEmpty()) {
+            db.taxItemDao().updateEvidenceState(entityId, "REQUESTED", Instant.now().toEpochMilli())
+        }
+    }
+
+    /** Links the replacement first, so a failed replacement never destroys the old evidence link. */
+    suspend fun replaceDocumentLink(oldDocumentId: String, newDocumentId: String, entityType: String, entityId: String, purpose: String = "EVIDENCE") {
+        db.withTransaction {
+            linkDocument(newDocumentId, entityType, entityId, purpose)
+            db.documentLinkDao().deleteLink(oldDocumentId, entityType, entityId)
+        }
     }
 
     /** Number of records (tax items, accounts, etc.) currently linked to this document, for a safe-delete warning. */
@@ -749,7 +971,7 @@ class FinanceRepository(private val db: AppDatabase) {
         val utilityDocuments = utilityAttachments.map { attachment ->
             BackupFile("documents/utility/${File(attachment.storagePath).name}", File(attachment.storagePath).readBytes())
         }
-        val recordCount = db.financialContextDao().getAll().size + db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size + db.incomeSourceDao().getAll().size + db.utilityBillDao().getAll().size + db.monthlyBillOccurrenceDao().getAll().size + db.paymentRecordDao().getAll().size + utilityAttachments.size
+        val recordCount = db.financialContextDao().getAll().size + db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size + db.incomeSourceDao().getAll().size + db.utilityBillDao().getAll().size + db.monthlyBillOccurrenceDao().getAll().size + db.paymentRecordDao().getAll().size + db.categoryDao().getAll().size + db.recurringTemplateDao().getActive().size + db.expectedOccurrenceDao().getAll().size + db.settlementEventDao().getAll().size + db.simpleInvestmentDao().getActive().size + utilityAttachments.size
         return try {
             BackupPackageService().create(snapshotFile.readBytes(), documents + utilityDocuments, BuildConfig.VERSION_NAME, DATABASE_VERSION, password, recordCount, allDocuments.map { it.sha256 }, runCatching { pk.vexel.financepassport.core.taxrules.BundledTaxRulesets.loadDefault().version }.getOrNull()).payload
         } finally {
@@ -777,7 +999,7 @@ class FinanceRepository(private val db: AppDatabase) {
             val utilityDocuments = utilityAttachments.map { attachment ->
                 BackupDiskFile("documents/utility/${File(attachment.storagePath).name}", File(attachment.storagePath))
             }
-            val recordCount = db.financialContextDao().getAll().size + db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size + db.incomeSourceDao().getAll().size + db.utilityBillDao().getAll().size + db.monthlyBillOccurrenceDao().getAll().size + db.paymentRecordDao().getAll().size + utilityAttachments.size
+            val recordCount = db.financialContextDao().getAll().size + db.accountDao().getAll().size + db.financialEventDao().getAll().size + db.wealthDao().getAllAssets().size + db.wealthDao().getAllLiabilities().size + db.taxItemDao().getAll().size + db.documentDao().getAll().size + db.investmentDao().getAll().size + db.receivableDao().getAll().size + db.goalDao().getAll().size + db.officialRecordDao().getAll().size + db.budgetDao().getAll().size + db.incomeSourceDao().getAll().size + db.utilityBillDao().getAll().size + db.monthlyBillOccurrenceDao().getAll().size + db.paymentRecordDao().getAll().size + db.categoryDao().getAll().size + db.recurringTemplateDao().getActive().size + db.expectedOccurrenceDao().getAll().size + db.settlementEventDao().getAll().size + db.simpleInvestmentDao().getActive().size + utilityAttachments.size
             BackupPackageService().createStreaming(snapshotFile, documents + utilityDocuments, BuildConfig.VERSION_NAME, DATABASE_VERSION, password, recordCount, output)
             return output
         } catch (failure: Throwable) {
@@ -1005,4 +1227,3 @@ class FinanceRepository(private val db: AppDatabase) {
         }
     }
 }
-
