@@ -248,6 +248,48 @@ class DatabaseMigrationTest {
     }
 
     @Test
+    fun migrateV15ToV16AddsCategoriesRecurringAndSettlementTablesWithoutDroppingData() {
+        helper.createDatabase("migration-v15", 15).apply {
+            execSQL("INSERT INTO financial_events (id, eventType, dateEpochDay, amountMinor, currency, description, taxRelevance, createdAtEpochMillis, updatedAtEpochMillis) VALUES ('fe1', 'EXPENSE', 1, 500, 'PKR', 'Groceries', 'UNKNOWN', 1, 1)")
+            execSQL("INSERT INTO liabilities (id, type, title, originalAmountMinor, outstandingAmountMinor, currency, startDateEpochDay, status) VALUES ('lb1', 'LOAN', 'Car loan', 100000, 80000, 'PKR', 1, 'ACTIVE')")
+            execSQL("INSERT INTO receivables (id, title, counterparty, originalAmountMinor, outstandingAmountMinor, status) VALUES ('rc1', 'Loaned to Ali', 'Ali', 5000, 5000, 'OUTSTANDING')")
+            close()
+        }
+
+        helper.runMigrationsAndValidate("migration-v15", 16, true, MIGRATION_15_16).use { database ->
+            database.query("SELECT description, categoryId, cashEffectMinor FROM financial_events WHERE id = 'fe1'").use { cursor ->
+                check(cursor.moveToFirst())
+                check(cursor.getString(0) == "Groceries")
+                check(cursor.isNull(1))
+                check(cursor.isNull(2))
+            }
+            database.query("SELECT outstandingAmountMinor, contextId, linkedAssetId FROM liabilities WHERE id = 'lb1'").use { cursor ->
+                check(cursor.moveToFirst())
+                check(cursor.getLong(0) == 80000L)
+                check(cursor.isNull(1))
+                check(cursor.isNull(2))
+            }
+            database.query("SELECT outstandingAmountMinor, receivableType FROM receivables WHERE id = 'rc1'").use { cursor ->
+                check(cursor.moveToFirst())
+                check(cursor.getLong(0) == 5000L)
+                check(cursor.getString(1) == "OTHER")
+            }
+
+            database.execSQL("INSERT INTO categories (id, name, family, status, createdAtEpochMillis, updatedAtEpochMillis) VALUES ('cat1', 'Groceries', 'EXPENSE', 'ACTIVE', 1, 1)")
+            database.query("SELECT COUNT(*) FROM categories").use { cursor -> check(cursor.moveToFirst() && cursor.getInt(0) == 1) }
+
+            database.execSQL("INSERT INTO recurring_templates (id, title, eventType, amountMode, currency, frequency, intervalCount, startDateEpochDay, status, createdAtEpochMillis, updatedAtEpochMillis) VALUES ('rt1', 'Rent', 'EXPENSE', 'FIXED', 'PKR', 'MONTHLY', 1, 1, 'ACTIVE', 1, 1)")
+            database.execSQL("INSERT INTO expected_occurrences (id, templateId, dueDateEpochDay, status, createdAtEpochMillis, updatedAtEpochMillis) VALUES ('eo1', 'rt1', 2, 'PENDING', 1, 1)")
+            database.query("SELECT COUNT(*) FROM expected_occurrences WHERE templateId = 'rt1'").use { cursor -> check(cursor.moveToFirst() && cursor.getInt(0) == 1) }
+
+            database.execSQL("INSERT INTO settlement_events (id, entityType, entityId, financialEventId, principalAmountMinor, financingCostMinor, dateEpochDay, status) VALUES ('se1', 'LIABILITY', 'lb1', 'fe1', 1000, 0, 1, 'POSTED')")
+            database.execSQL("INSERT INTO simple_investments (id, title, type, acquisitionDateEpochDay, principalInvestedMinor, currentEstimatedValueMinor, currency, status) VALUES ('si1', 'Mutual fund', 'FUND', 1, 10000, 11000, 'PKR', 'ACTIVE')")
+            database.query("SELECT COUNT(*) FROM settlement_events").use { cursor -> check(cursor.moveToFirst() && cursor.getInt(0) == 1) }
+            database.query("SELECT COUNT(*) FROM simple_investments").use { cursor -> check(cursor.moveToFirst() && cursor.getInt(0) == 1) }
+        }
+    }
+
+    @Test
     fun migrateV16ToV17AddsPositionSnapshotsWithoutChangingExistingRows() {
         helper.createDatabase("migration-v16", 16).apply {
             execSQL("INSERT INTO wealth_snapshots (id, taxYearId, kind, snapshotDateEpochDay, liquidFundsMinor, investmentsValueMinor, assetsValueMinor, receivablesValueMinor, liabilitiesValueMinor, netWealthMinor, createdAtEpochMillis) VALUES ('legacy', 'PK-2026', 'OPENING', 1, 10, 20, 30, 40, 5, 95, 1)")

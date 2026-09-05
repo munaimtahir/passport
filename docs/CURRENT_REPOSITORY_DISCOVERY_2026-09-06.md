@@ -8,6 +8,30 @@ session. Where a claim could not be reproduced (device/emulator testing — no h
 virtualization available in this environment), that is stated explicitly and the most recent real
 evidence is cited with its commit distance from HEAD.
 
+> **Addendum, same day, later HEAD:** while this report was being finalized, a separate,
+> concurrently-running process pushed commit `2bf2f03` ("verification") directly to `origin/main`,
+> moving HEAD 1 commit past what this report documents. That commit fixed both High defects this
+> report identifies in §19 (items 1–2: the `FinancialEventEntity` constructor mismatch breaking
+> `./gradlew test`, and the two `SuspiciousIndentation` lint errors), bumped the schema to v16 then
+> v17 (Categories, Recurring Templates/Occurrences, Settlement Events, Simple Investments, Position
+> Snapshots — Waves C–J per its own new docs), and added genuinely reachable `Position`, `Calendar`,
+> and `Vault` bottom-nav destinations plus working Reports buttons (net worth / income-expense /
+> cash flow) in the Settings dialog — meaningfully closing the "present but unreachable" findings
+> in §5/§16 for Wealth, Vault, and Reports. It also committed a 95,739-line raw device `crash_log.txt`
+> and six disposable one-off Python patch scripts (`fix_repo.py`, `fix_test.py`, `patch_daos.py`,
+> `patch_db.py`, `patch_entities.py`, `patch_provider.py`) to the repo root, and left the new v15→v16
+> migration without a dedicated `DatabaseMigrationTest` case (every other migration boundary has
+> one). A follow-up pass in this same session: (a) re-ran `clean`/`test`/`lint`/`assembleDebug`/
+> `bundleRelease`/`compileDebugAndroidTestKotlin` against the new HEAD — all six now PASS; (b)
+> removed the crash log and the six patch scripts (`git rm`); (c) added
+> `migrateV15ToV16AddsCategoriesRecurringAndSettlementTablesWithoutDroppingData` to
+> `DatabaseMigrationTest.kt`, following the existing per-boundary test pattern, compiled but **not
+> device-run** (same KVM/`vmx`/`svm` unavailability as the rest of this report). The **Tax**
+> pillar (§5, §16) still has no reachable screen or destination after `2bf2f03`, and none of Waves
+> C–J have been run on a device/emulator yet — the verdict and findings below otherwise stand as
+> originally written for the commit they were verified against; treat this addendum, not a rewrite
+> of §1–§22, as the current state.
+
 ---
 
 ## 1. Executive Verdict
